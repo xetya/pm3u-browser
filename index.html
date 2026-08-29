@@ -436,244 +436,6 @@
       }
       if(current){
         current.url = line;
-        channel00; font-size:56px; color:var(--accent);
-    letter-spacing:.06em; text-shadow:0 0 26px var(--accent-soft); min-width:130px;
-  }
-  .numpad-hint{ font-family:var(--font-mono); font-size:10.5px; color:var(--text-3); margin-top:4px; letter-spacing:.08em; text-transform:uppercase;}
-
-  /* ---------- Corner settings button ---------- */
-  .corner-btn{
-    position:fixed; bottom:20px; right:20px; z-index:22;
-    display:flex; align-items:center; gap:8px;
-    background:var(--panel-glass); border:1px solid var(--line); border-radius:100px;
-    padding:9px 14px 9px 10px; color:var(--text-2); font-family:var(--font-mono); font-size:11px;
-    letter-spacing:.05em; cursor:pointer; opacity:0; transform:translateY(6px);
-    transition:opacity .25s, transform .25s;
-  }
-  .corner-btn.visible{ opacity:1; transform:translateY(0); }
-  .corner-btn:hover{ color:var(--text-1); border-color:var(--text-3); }
-  .corner-btn svg{ width:15px; height:15px; }
-
-  /* ---------- Empty / error state on player ---------- */
-  .player-empty{
-    position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
-    flex-direction:column; gap:10px; z-index:5; color:var(--text-3);
-    font-family:var(--font-mono); font-size:12.5px; letter-spacing:.06em; text-align:center;
-  }
-  .player-empty[hidden]{display:none;}
-
-  @media (max-width:560px){
-    .osd-number{ font-size:38px; min-width:52px; }
-    .osd-name{ font-size:16px; }
-    .osd-logo{ width:46px; height:46px; }
-    .osd-inner{ padding:13px 16px; gap:14px;}
-    .numpad-digits{ font-size:42px; }
-    .modal-card{ padding:24px 20px 20px; }
-  }
-
-  ::selection{ background:var(--accent-soft); }
-</style>
-</head>
-<body>
-
-<div id="stage">
-  <video id="video" playsinline></video>
-  <div class="player-empty" id="playerEmpty" hidden>
-    <div style="font-family:var(--font-display); font-size:15px; color:var(--text-2); letter-spacing:.02em;">TIDAK ADA SINYAL</div>
-    <div>Menunggu channel dipilih</div>
-  </div>
-</div>
-
-<!-- Toast status -->
-<div class="toast" id="toast"><span class="toast-dot"></span><span id="toastText">—</span></div>
-
-<!-- Autoplay gate: fallback only, shown if even muted autoplay is blocked -->
-<div class="autoplay-gate" id="autoplayGate" hidden>
-  <div class="autoplay-icon">▶</div>
-  <div class="autoplay-text">TEKAN TOMBOL APA SAJA UNTUK MULAI MENONTON</div>
-</div>
-
-<!-- Muted indicator: shown briefly after playback starts, non-blocking -->
-<button class="corner-btn" id="mutedBadge" style="left:20px; right:auto; bottom:20px;" hidden>
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M11 5 6 9H3v6h3l5 4V5z"/><line x1="16" y1="9" x2="22" y2="15"/><line x1="22" y1="9" x2="16" y2="15"/></svg>
-  Suara nonaktif — klik untuk aktifkan
-</button>
-
-<!-- OSD channel banner -->
-<div class="osd" id="osd">
-  <div class="osd-inner">
-    <div class="osd-logo" id="osdLogo"><span class="osd-logo-fallback" id="osdLogoFallback">—</span></div>
-    <div class="osd-number" id="osdNumber">–</div>
-    <div class="osd-divider"></div>
-    <div class="osd-info">
-      <div class="osd-name" id="osdName">—</div>
-      <div class="osd-meta">
-        <span class="osd-live">LIVE</span>
-        <span class="osd-tag" id="osdGroup" hidden></span>
-      </div>
-    </div>
-    <div class="osd-right">
-      <div class="osd-clock" id="osdClock">--:--</div>
-      <div class="signal-bars">
-        <span class="bar" style="--i:0"></span>
-        <span class="bar" style="--i:1"></span>
-        <span class="bar" style="--i:2"></span>
-        <span class="bar" style="--i:3"></span>
-        <span class="bar" style="--i:4"></span>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- Number entry overlay -->
-<div class="numpad-overlay" id="numpadOverlay">
-  <div class="numpad-box">
-    <div class="numpad-digits" id="numpadDigits">0</div>
-    <div class="numpad-hint">Pindah ke channel</div>
-  </div>
-</div>
-
-<!-- Corner settings button -->
-<button class="corner-btn" id="cornerBtn" title="Ganti playlist (S)">
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.04 1.56V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 9 19.36a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.64 15a1.7 1.7 0 0 0-1.56-1.04H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.64 9a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.64a1.7 1.7 0 0 0 1.04-1.56V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1.04 1.56 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.36 9a1.7 1.7 0 0 0 1.56 1.04H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1.04z"/></svg>
-  Ganti Playlist
-</button>
-
-<!-- Boot / settings modal -->
-<div class="overlay" id="modalOverlay">
-  <div class="modal-card">
-    <button class="modal-close" id="modalCloseBtn" hidden>✕</button>
-    <div class="modal-eyebrow">TUNER</div>
-    <div class="modal-title" id="modalTitle">Masukkan Playlist M3U</div>
-    <p class="modal-sub" id="modalSub">Tempelkan URL playlist M3U/M3U8 kamu. Setelah berhasil dimuat, playlist ini akan tersimpan otomatis di perangkat ini.</p>
-    <label class="field-label" for="m3uUrl">URL Playlist</label>
-    <input class="field-input" id="m3uUrl" type="url" placeholder="https://contoh.com/playlist.m3u8" autocomplete="off" spellcheck="false">
-    <div class="modal-error" id="modalError"></div>
-    <div class="btn-row">
-      <button class="btn btn-primary" id="loadBtn">Mulai Menonton</button>
-    </div>
-    <div class="btn-row" id="resetRow" hidden>
-      <button class="btn btn-danger" id="resetBtn" style="flex:1;">Hapus Playlist Tersimpan</button>
-    </div>
-    <div class="control-legend">
-      <div class="legend-item"><span class="legend-key">▲ / PgUp</span> Channel naik</div>
-      <div class="legend-item"><span class="legend-key">▼ / PgDn</span> Channel turun</div>
-      <div class="legend-item"><span class="legend-key">0-9</span> Lompat ke nomor</div>
-      <div class="legend-item"><span class="legend-key">Enter</span> Konfirmasi</div>
-    </div>
-  </div>
-</div>
-
-<script>
-(function(){
-  "use strict";
-
-  var LS_URL = 'tuner_playlist_url';
-  var LS_CHANNELS = 'tuner_channels';
-  var LS_LAST = 'tuner_last_channel_number';
-
-  var els = {
-    video: document.getElementById('video'),
-    playerEmpty: document.getElementById('playerEmpty'),
-    toast: document.getElementById('toast'),
-    toastText: document.getElementById('toastText'),
-    autoplayGate: document.getElementById('autoplayGate'),
-    osd: document.getElementById('osd'),
-    osdLogo: document.getElementById('osdLogo'),
-    osdLogoFallback: document.getElementById('osdLogoFallback'),
-    osdNumber: document.getElementById('osdNumber'),
-    osdName: document.getElementById('osdName'),
-    osdGroup: document.getElementById('osdGroup'),
-    osdClock: document.getElementById('osdClock'),
-    numpadOverlay: document.getElementById('numpadOverlay'),
-    numpadDigits: document.getElementById('numpadDigits'),
-    cornerBtn: document.getElementById('cornerBtn'),
-    modalOverlay: document.getElementById('modalOverlay'),
-    modalTitle: document.getElementById('modalTitle'),
-    modalSub: document.getElementById('modalSub'),
-    modalError: document.getElementById('modalError'),
-    modalCloseBtn: document.getElementById('modalCloseBtn'),
-    resetRow: document.getElementById('resetRow'),
-    resetBtn: document.getElementById('resetBtn'),
-    m3uUrl: document.getElementById('m3uUrl'),
-    loadBtn: document.getElementById('loadBtn')
-  };
-
-  var state = {
-    channels: [],
-    currentIndex: 0,
-    numberBuffer: '',
-    numberTimer: null,
-    hls: null,
-    osdTimer: null,
-    cornerTimer: null,
-    hasChannels: false,
-    errorRetried: false
-  };
-
-  /* ---------------- Utilities ---------------- */
-
-  function toast(text, opts){
-    opts = opts || {};
-    els.toastText.textContent = text;
-    els.toast.classList.remove('error','pulse');
-    if(opts.error) els.toast.classList.add('error');
-    if(opts.pulse) els.toast.classList.add('pulse');
-    els.toast.classList.add('show');
-    clearTimeout(toast._t);
-    if(opts.sticky !== true){
-      toast._t = setTimeout(function(){ els.toast.classList.remove('show'); }, opts.duration || 2200);
-    }
-  }
-  function hideToast(){ els.toast.classList.remove('show'); }
-
-  function updateClock(){
-    var d = new Date();
-    var h = String(d.getHours()).padStart(2,'0');
-    var m = String(d.getMinutes()).padStart(2,'0');
-    els.osdClock.textContent = h + ':' + m;
-  }
-  setInterval(updateClock, 15000);
-  updateClock();
-
-  /* ---------------- M3U parsing ---------------- */
-
-  function parseM3U(text){
-    var lines = text.split(/\r?\n/);
-    var channels = [];
-    var current = null;
-    var attrRegex = /([a-zA-Z0-9_-]+)="([^"]*)"/g;
-
-    for(var i=0;i<lines.length;i++){
-      var line = lines[i].trim();
-      if(!line) continue;
-      if(line.charAt(0) === '#'){
-        if(line.toUpperCase().indexOf('#EXTINF') === 0){
-          var attrs = {};
-          var m;
-          attrRegex.lastIndex = 0;
-          while((m = attrRegex.exec(line))){
-            attrs[m[1].toLowerCase()] = m[2];
-          }
-          var commaIdx = line.indexOf(',');
-          var name = commaIdx >= 0 ? line.slice(commaIdx+1).trim() : 'Tanpa Nama';
-          var chno = null;
-          if(attrs['tvg-chno'] && /^\d+$/.test(attrs['tvg-chno'])){
-            chno = parseInt(attrs['tvg-chno'],10);
-          } else if(attrs['tvg-id'] && /^\d+$/.test(attrs['tvg-id'])){
-            chno = parseInt(attrs['tvg-id'],10);
-          }
-          current = {
-            name: name || 'Tanpa Nama',
-            logo: attrs['tvg-logo'] || '',
-            group: attrs['group-title'] || '',
-            number: chno
-          };
-        }
-        continue;
-      }
-      if(current){
-        current.url = line;
         channels.push(current);
         current = null;
       }
@@ -704,15 +466,31 @@
 
   /* ---------------- Fetching playlist ---------------- */
 
+  function fetchWithTimeout(url, ms){
+    var controller = new AbortController();
+    var timer = setTimeout(function(){ controller.abort(); }, ms);
+    return fetch(url, {cache:'no-store', signal: controller.signal}).finally(function(){
+      clearTimeout(timer);
+    });
+  }
+
   function fetchPlaylist(url){
-    return fetch(url, {cache:'no-store'}).then(function(res){
+    return fetchWithTimeout(url, 10000).then(function(res){
       if(!res.ok) throw new Error('HTTP ' + res.status);
       return res.text();
-    }).catch(function(){
+    }).catch(function(err){
+      if(err && err.name === 'AbortError'){
+        // Sumber langsung terlalu lama merespons, langsung coba lewat proxy.
+      }
       var proxied = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(url);
-      return fetch(proxied).then(function(res){
+      return fetchWithTimeout(proxied, 12000).then(function(res){
         if(!res.ok) throw new Error('Proxy HTTP ' + res.status);
         return res.text();
+      }).catch(function(err2){
+        if(err2 && err2.name === 'AbortError'){
+          throw new Error('Waktu tunggu habis. Server playlist tidak merespons, coba lagi atau periksa URL-nya.');
+        }
+        throw new Error('Gagal mengambil playlist. Periksa URL, koneksi, atau kemungkinan server memblokir akses (CORS).');
       });
     });
   }
@@ -896,6 +674,116 @@
       try{ state.hls.destroy(); }catch(e){}
       state.hls = null;
     }
+    if(state.mpegts){
+      try{ state.mpegts.destroy(); }catch(e){}
+      state.mpegts = null;
+    }
+  }
+
+  function getExt(url){
+    var clean = url.split('?')[0].split('#')[0];
+    var m = clean.match(/\.([a-z0-9]+)$/i);
+    return m ? m[1].toLowerCase() : '';
+  }
+
+  function tryNativeVideo(url, onFail){
+    els.video.src = url;
+    var settled = false;
+    var onReady = function(){
+      if(settled) return; settled = true;
+      cleanup();
+      attemptPlay();
+    };
+    var onErr = function(){
+      if(settled) return; settled = true;
+      cleanup();
+      onFail();
+    };
+    function cleanup(){
+      els.video.removeEventListener('loadedmetadata', onReady);
+      els.video.removeEventListener('error', onErr);
+    }
+    els.video.addEventListener('loadedmetadata', onReady);
+    els.video.addEventListener('error', onErr, {once:true});
+  }
+
+  function tryHls(url, onFail){
+    if(!(window.Hls && Hls.isSupported())){
+      // Safari & beberapa browser TV punya dukungan HLS native lewat <video> langsung.
+      if(els.video.canPlayType('application/vnd.apple.mpegurl')){
+        tryNativeVideo(url, onFail);
+      } else {
+        onFail();
+      }
+      return;
+    }
+    var hls = new Hls({ maxBufferLength: 30, liveDurationInfinity:true });
+    state.hls = hls;
+    var failed = false;
+    hls.on(Hls.Events.MANIFEST_PARSED, function(){
+      attemptPlay();
+    });
+    hls.on(Hls.Events.ERROR, function(evt, data){
+      if(data && data.fatal && !failed){
+        failed = true;
+        cleanupHls();
+        onFail();
+      }
+    });
+    hls.loadSource(url);
+    hls.attachMedia(els.video);
+  }
+
+  function tryMpegts(url, kind, onFail){
+    if(!(window.mpegts && mpegts.isSupported())){
+      onFail();
+      return;
+    }
+    var failed = false;
+    try{
+      var player = mpegts.createPlayer({ type: kind, isLive: true, url: url });
+      state.mpegts = player;
+      player.attachMediaElement(els.video);
+      player.on(mpegts.Events.ERROR, function(){
+        if(!failed){
+          failed = true;
+          cleanupHls();
+          onFail();
+        }
+      });
+      player.load();
+      attemptPlay();
+    }catch(e){
+      if(!failed){ failed = true; cleanupHls(); onFail(); }
+    }
+  }
+
+  function finalPlaybackError(){
+    els.playerEmpty.hidden = false;
+    toast('Channel ini tidak dapat diputar (server mungkin membatasi akses lintas domain)', {error:true, duration:4200});
+  }
+
+  function setupPlayer(url){
+    cleanupHls();
+    els.playerEmpty.hidden = true;
+    els.video.removeAttribute('src');
+    els.video.load();
+    toast('Memuat channel…', {pulse:true, sticky:true});
+
+    var ext = getExt(url);
+
+    if(ext === 'flv'){
+      tryMpegts(url, 'flv', function(){ tryNativeVideo(url, finalPlaybackError); });
+    } else if(ext === 'ts'){
+      tryMpegts(url, 'mpegts', function(){ tryNativeVideo(url, finalPlaybackError); });
+    } else if(ext === 'mp4' || ext === 'webm' || ext === 'ogg'){
+      tryNativeVideo(url, function(){ tryHls(url, finalPlaybackError); });
+    } else {
+      // m3u8 atau ekstensi tidak dikenal: HLS dulu, lalu MPEG-TS, lalu native mentah.
+      tryHls(url, function(){
+        tryMpegts(url, 'mpegts', function(){ tryNativeVideo(url, finalPlaybackError); });
+      });
+    }
   }
 
   function handleAutoplayBlock(){
@@ -951,52 +839,6 @@
           showMutedBadge();
         }).catch(handleAutoplayBlock);
       });
-    }
-  }
-
-  function handlePlaybackError(){
-    els.playerEmpty.hidden = false;
-    if(!state.errorRetried){
-      state.errorRetried = true;
-      toast('Sinyal terputus, mencoba ulang…', {error:true, sticky:true});
-      setTimeout(function(){
-        var ch = state.channels[state.currentIndex];
-        if(ch) setupPlayer(ch.url);
-      }, 1800);
-    } else {
-      toast('Channel ini tidak dapat diputar', {error:true, duration:3500});
-    }
-  }
-
-  function setupPlayer(url){
-    cleanupHls();
-    state.errorRetried = false;
-    els.playerEmpty.hidden = true;
-    els.video.removeAttribute('src');
-    els.video.load();
-    toast('Memuat channel…', {pulse:true, sticky:true});
-
-    var isHls = /\.m3u8(\?|$)/i.test(url);
-
-    if(window.Hls && Hls.isSupported() && isHls){
-      var hls = new Hls({ maxBufferLength: 30, liveDurationInfinity:true });
-      state.hls = hls;
-      hls.loadSource(url);
-      hls.attachMedia(els.video);
-      hls.on(Hls.Events.MANIFEST_PARSED, function(){
-        attemptPlay();
-      });
-      hls.on(Hls.Events.ERROR, function(evt, data){
-        if(data && data.fatal) handlePlaybackError();
-      });
-    } else {
-      els.video.src = url;
-      var onReady = function(){
-        attemptPlay();
-        els.video.removeEventListener('loadedmetadata', onReady);
-      };
-      els.video.addEventListener('loadedmetadata', onReady);
-      els.video.addEventListener('error', handlePlaybackError, {once:true});
     }
   }
 
