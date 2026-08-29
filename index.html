@@ -248,11 +248,17 @@
 <!-- Toast status -->
 <div class="toast" id="toast"><span class="toast-dot"></span><span id="toastText">—</span></div>
 
-<!-- Autoplay gate -->
+<!-- Autoplay gate: fallback only, shown if even muted autoplay is blocked -->
 <div class="autoplay-gate" id="autoplayGate" hidden>
   <div class="autoplay-icon">▶</div>
   <div class="autoplay-text">TEKAN TOMBOL APA SAJA UNTUK MULAI MENONTON</div>
 </div>
+
+<!-- Muted indicator: shown briefly after playback starts, non-blocking -->
+<button class="corner-btn" id="mutedBadge" style="left:20px; right:auto; bottom:20px;" hidden>
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M11 5 6 9H3v6h3l5 4V5z"/><line x1="16" y1="9" x2="22" y2="15"/><line x1="22" y1="9" x2="16" y2="15"/></svg>
+  Suara nonaktif — klik untuk aktifkan
+</button>
 
 <!-- OSD channel banner -->
 <div class="osd" id="osd">
@@ -654,15 +660,60 @@
   }
 
   function handleAutoplayBlock(){
+    // Fallback terakhir: bahkan mode bisu pun diblokir (sangat jarang terjadi).
     els.autoplayGate.hidden = false;
   }
   function dismissAutoplayGate(){
     if(!els.autoplayGate.hidden){
       els.autoplayGate.hidden = true;
-      els.video.play().catch(function(){});
+      attemptPlay();
     }
   }
   els.autoplayGate.addEventListener('click', dismissAutoplayGate);
+
+  var mutedBadgeEl = document.getElementById('mutedBadge');
+  var mutedBadgeTimer = null;
+
+  function showMutedBadge(){
+    if(!els.video.muted) return;
+    mutedBadgeEl.hidden = false;
+    mutedBadgeEl.classList.add('visible');
+    clearTimeout(mutedBadgeTimer);
+    mutedBadgeTimer = setTimeout(function(){
+      mutedBadgeEl.classList.remove('visible');
+    }, 6000);
+  }
+  function hideMutedBadge(){
+    mutedBadgeEl.classList.remove('visible');
+    setTimeout(function(){ mutedBadgeEl.hidden = true; }, 300);
+  }
+  function unmute(){
+    if(els.video.muted){
+      els.video.muted = false;
+      hideMutedBadge();
+    }
+  }
+  mutedBadgeEl.addEventListener('click', unmute);
+  els.video.addEventListener('click', unmute);
+
+  // Coba putar dengan suara aktif dulu (berhasil di banyak browser TV/webview).
+  // Kalau ditolak browser, baru jatuh ke autoplay bisu + tombol aktifkan suara.
+  function attemptPlay(){
+    els.video.muted = false;
+    var p = els.video.play();
+    if(p && typeof p.then === 'function'){
+      p.then(function(){
+        hideToast();
+        hideMutedBadge();
+      }).catch(function(){
+        els.video.muted = true;
+        els.video.play().then(function(){
+          hideToast();
+          showMutedBadge();
+        }).catch(handleAutoplayBlock);
+      });
+    }
+  }
 
   function handlePlaybackError(){
     els.playerEmpty.hidden = false;
@@ -694,8 +745,7 @@
       hls.loadSource(url);
       hls.attachMedia(els.video);
       hls.on(Hls.Events.MANIFEST_PARSED, function(){
-        hideToast();
-        els.video.play().catch(handleAutoplayBlock);
+        attemptPlay();
       });
       hls.on(Hls.Events.ERROR, function(evt, data){
         if(data && data.fatal) handlePlaybackError();
@@ -703,8 +753,7 @@
     } else {
       els.video.src = url;
       var onReady = function(){
-        hideToast();
-        els.video.play().catch(handleAutoplayBlock);
+        attemptPlay();
         els.video.removeEventListener('loadedmetadata', onReady);
       };
       els.video.addEventListener('loadedmetadata', onReady);
