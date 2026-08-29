@@ -1,965 +1,800 @@
 <!DOCTYPE html>
 <html lang="id">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-<meta name="color-scheme" content="dark" />
-<title>TV Player</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>TUNER — Pemutar Playlist M3U</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.5.13/hls.min.js"></script>
 <style>
-  :root {
-    --bg: #14171d;
-    --panel: #1b1f27;
-    --panel-2: #232936;
-    --recessed: #0c0e12;
-    --glow: #ffb545;
-    --glow-dim: rgba(255,181,69,0.14);
-    --glow-mid: #c9915a;
-    --text: #e9e6e0;
-    --text-dim: #82868d;
-    --danger: #ff6b57;
-    --radius-lg: 18px;
-    --radius-md: 12px;
-    --radius-sm: 8px;
-    --font-body: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Consolas, monospace;
+  :root{
+    --void:#07080a;
+    --panel:#111419;
+    --panel-glass: rgba(17,20,25,.88);
+    --line: rgba(255,255,255,.09);
+    --text-1:#F2F4F7;
+    --text-2:#8D97A6;
+    --text-3:#5C6572;
+    --accent:#FFB020;
+    --accent-soft: rgba(255,176,32,.16);
+    --live:#FF4545;
+    --ok:#3DDC97;
+    --font-display:'Chakra Petch', sans-serif;
+    --font-body:'Inter', sans-serif;
+    --font-mono:'JetBrains Mono', monospace;
   }
-  * { box-sizing: border-box; }
-  html, body {
-    margin: 0; padding: 0; height: 100%; background: var(--bg); color: var(--text);
-    font-family: var(--font-body); overflow: hidden; -webkit-tap-highlight-color: transparent;
-    user-select: none;
+  *{box-sizing:border-box;}
+  html,body{
+    margin:0; height:100%; background:var(--void); overflow:hidden;
+    font-family:var(--font-body); color:var(--text-1);
+    -webkit-tap-highlight-color:transparent; user-select:none;
   }
-  #app { position: fixed; inset: 0; }
-  .hidden { display: none !important; }
-  button, input { font-family: inherit; }
-  :focus-visible { outline: 2px solid var(--glow); outline-offset: 2px; }
+  #stage{position:fixed; inset:0; background:#000;}
+  video{width:100%; height:100%; object-fit:contain; background:#000; display:block;}
 
-  /* ---------- shared tuner display ---------- */
-  .tuner-display {
-    font-family: var(--font-mono);
-    background: var(--recessed);
-    color: var(--glow);
-    font-weight: 700;
-    text-shadow: 0 0 10px rgba(255,181,69,0.5);
-    box-shadow: inset 0 2px 8px rgba(0,0,0,0.7), inset 0 0 0 1px rgba(255,181,69,0.1);
-    font-variant-numeric: tabular-nums;
-    letter-spacing: 2px;
-    border-radius: var(--radius-sm);
+  /* ---------- Boot / Settings modal ---------- */
+  .overlay{
+    position:fixed; inset:0; background:rgba(5,6,8,.72);
+    backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
+    display:flex; align-items:center; justify-content:center;
+    z-index:50; padding:24px;
+  }
+  .overlay[hidden]{display:none;}
+  .modal-card{
+    width:min(460px, 100%);
+    background:var(--panel-glass);
+    border:1px solid var(--line);
+    border-radius:18px;
+    padding:32px 28px 26px;
+    position:relative;
+    box-shadow:0 24px 60px rgba(0,0,0,.55);
+  }
+  .modal-eyebrow{
+    font-family:var(--font-mono); font-size:11px; letter-spacing:.16em;
+    color:var(--accent); text-transform:uppercase; display:flex; align-items:center; gap:8px;
+  }
+  .modal-eyebrow::before{
+    content:''; width:7px; height:7px; border-radius:50%; background:var(--accent);
+    box-shadow:0 0 10px var(--accent); display:inline-block;
+  }
+  .modal-title{
+    font-family:var(--font-display); font-weight:600; font-size:26px;
+    margin:10px 0 6px; letter-spacing:.01em;
+  }
+  .modal-sub{ color:var(--text-2); font-size:13.5px; line-height:1.55; margin:0 0 22px;}
+  .field-label{ font-size:11.5px; color:var(--text-3); text-transform:uppercase; letter-spacing:.08em; margin-bottom:7px; display:block; font-family:var(--font-mono);}
+  .field-input{
+    width:100%; background:#0b0d10; border:1px solid var(--line); color:var(--text-1);
+    font-family:var(--font-mono); font-size:14px; padding:13px 14px; border-radius:10px;
+    outline:none; transition:border-color .15s, box-shadow .15s;
+  }
+  .field-input:focus{ border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft); }
+  .field-input::placeholder{ color:var(--text-3); }
+  .modal-error{
+    color:#FF7A7A; font-size:12.5px; margin-top:10px; min-height:14px; line-height:1.5;
+  }
+  .btn-row{ display:flex; gap:10px; margin-top:22px; }
+  .btn{
+    font-family:var(--font-body); font-weight:600; font-size:14px; border:none; cursor:pointer;
+    padding:13px 18px; border-radius:10px; transition:transform .12s, filter .12s, background .12s;
+  }
+  .btn:active{ transform:scale(.97); }
+  .btn-primary{ background:var(--accent); color:#1a1200; flex:1; }
+  .btn-primary:hover{ filter:brightness(1.08); }
+  .btn-primary[disabled]{ opacity:.55; cursor:default; }
+  .btn-ghost{ background:transparent; color:var(--text-2); border:1px solid var(--line); }
+  .btn-ghost:hover{ color:var(--text-1); border-color:var(--text-3); }
+  .btn-danger{ background:transparent; color:#FF7A7A; border:1px solid rgba(255,122,122,.3); }
+  .btn-danger:hover{ background:rgba(255,122,122,.08); }
+  .control-legend{
+    margin-top:24px; padding-top:18px; border-top:1px solid var(--line);
+    display:grid; grid-template-columns:1fr 1fr; gap:10px 16px;
+  }
+  .legend-item{ display:flex; align-items:center; gap:9px; font-size:12px; color:var(--text-2); }
+  .legend-key{
+    font-family:var(--font-mono); background:#0b0d10; border:1px solid var(--line);
+    color:var(--text-1); padding:3px 7px; border-radius:6px; font-size:11px; min-width:20px; text-align:center;
+  }
+  .modal-close{
+    position:absolute; top:16px; right:16px; width:30px; height:30px; border-radius:8px;
+    background:transparent; border:1px solid var(--line); color:var(--text-2); cursor:pointer;
+    display:flex; align-items:center; justify-content:center; font-size:15px;
+  }
+  .modal-close:hover{ color:var(--text-1); border-color:var(--text-3); }
+
+  /* ---------- Autoplay gate ---------- */
+  .autoplay-gate{
+    position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:40;
+    display:flex; align-items:center; justify-content:center; flex-direction:column; gap:14px;
+    cursor:pointer;
+  }
+  .autoplay-gate[hidden]{display:none;}
+  .autoplay-icon{
+    width:64px; height:64px; border-radius:50%; border:2px solid var(--accent);
+    display:flex; align-items:center; justify-content:center; color:var(--accent); font-size:24px;
+  }
+  .autoplay-text{ font-family:var(--font-mono); font-size:12.5px; color:var(--text-2); letter-spacing:.04em; }
+
+  /* ---------- Status toast ---------- */
+  .toast{
+    position:fixed; top:22px; left:50%; transform:translate(-50%,-14px);
+    background:var(--panel-glass); border:1px solid var(--line); border-radius:100px;
+    padding:9px 18px; font-family:var(--font-mono); font-size:12px; color:var(--text-2);
+    letter-spacing:.06em; opacity:0; transition:opacity .25s, transform .25s; z-index:30;
+    display:flex; align-items:center; gap:9px; pointer-events:none;
+  }
+  .toast.show{ opacity:1; transform:translate(-50%,0); }
+  .toast-dot{ width:6px; height:6px; border-radius:50%; background:var(--accent); }
+  .toast.pulse .toast-dot{ animation: blink 1s infinite; }
+  .toast.error .toast-dot{ background:var(--live); animation:none; }
+  @keyframes blink{ 0%,100%{opacity:1;} 50%{opacity:.25;} }
+
+  /* ---------- OSD channel banner ---------- */
+  .osd{
+    position:fixed; left:0; right:0; bottom:0; z-index:20;
+    padding:22px clamp(16px,4vw,48px) 26px;
+    background:linear-gradient(0deg, rgba(4,5,6,.92) 0%, rgba(4,5,6,.65) 55%, transparent 100%);
+    transform:translateY(100%); transition:transform .38s cubic-bezier(.2,.9,.25,1), opacity .38s;
+    opacity:0;
+  }
+  .osd.show{ transform:translateY(0); opacity:1; }
+  .osd-inner{
+    display:flex; align-items:center; gap:20px; max-width:1100px;
+    background:var(--panel-glass); border:1px solid var(--line); border-radius:16px;
+    padding:16px 22px; box-shadow:0 20px 50px rgba(0,0,0,.5);
+  }
+  .osd-logo{
+    width:58px; height:58px; border-radius:10px; background:#0b0d10; border:1px solid var(--line);
+    display:flex; align-items:center; justify-content:center; overflow:hidden; flex-shrink:0;
+  }
+  .osd-logo img{ width:100%; height:100%; object-fit:contain; }
+  .osd-logo-fallback{ font-family:var(--font-display); font-weight:600; font-size:19px; color:var(--accent); }
+  .osd-number{
+    font-family:var(--font-display); font-weight:700; font-size:52px; line-height:1;
+    color:var(--accent); text-shadow:0 0 26px var(--accent-soft), 0 0 2px rgba(255,176,32,.4);
+    min-width:70px; text-align:right; letter-spacing:.01em;
+  }
+  .osd-divider{ width:1px; align-self:stretch; background:var(--line); margin:2px 4px; }
+  .osd-info{ flex:1; min-width:0; }
+  .osd-name{ font-family:var(--font-display); font-weight:600; font-size:20px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .osd-meta{ display:flex; align-items:center; gap:8px; margin-top:5px; }
+  .osd-tag{
+    font-family:var(--font-mono); font-size:10.5px; letter-spacing:.06em; color:var(--text-2);
+    background:rgba(255,255,255,.05); border:1px solid var(--line); padding:3px 8px; border-radius:5px;
+    text-transform:uppercase; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:220px;
+  }
+  .osd-live{ display:flex; align-items:center; gap:5px; font-family:var(--font-mono); font-size:10.5px; color:var(--live); letter-spacing:.06em;}
+  .osd-live::before{ content:''; width:6px; height:6px; border-radius:50%; background:var(--live); animation:blink 1.3s infinite;}
+  .osd-right{ display:flex; flex-direction:column; align-items:flex-end; gap:8px; flex-shrink:0; }
+  .osd-clock{ font-family:var(--font-mono); font-size:13px; color:var(--text-2); letter-spacing:.04em; }
+  .signal-bars{ display:flex; align-items:flex-end; gap:3px; height:16px; }
+  .signal-bars .bar{
+    width:4px; background:var(--text-3); border-radius:2px; opacity:.35;
+    animation:none;
+  }
+  .signal-bars .bar:nth-child(1){ height:6px; }
+  .signal-bars .bar:nth-child(2){ height:9px; }
+  .signal-bars .bar:nth-child(3){ height:12px; }
+  .signal-bars .bar:nth-child(4){ height:15px; }
+  .signal-bars .bar:nth-child(5){ height:16px; }
+  .osd.show .signal-bars .bar{
+    background:var(--accent); opacity:1;
+    animation: fillbar .3s ease forwards;
+    animation-delay: calc(var(--i) * .06s);
+  }
+  @keyframes fillbar{ from{ opacity:.2; transform:scaleY(.3); transform-origin:bottom;} to{ opacity:1; transform:scaleY(1);} }
+
+  /* ---------- Number entry overlay ---------- */
+  .numpad-overlay{
+    position:fixed; top:14%; left:50%; transform:translateX(-50%) translateY(-8px);
+    z-index:25; opacity:0; pointer-events:none; transition:opacity .18s, transform .18s;
+  }
+  .numpad-overlay.show{ opacity:1; transform:translateX(-50%) translateY(0); }
+  .numpad-box{
+    background:var(--panel-glass); border:1px solid var(--line); border-radius:14px;
+    padding:16px 30px; text-align:center; box-shadow:0 20px 50px rgba(0,0,0,.5);
+  }
+  .numpad-digits{
+    font-family:var(--font-display); font-weight:700; font-size:56px; color:var(--accent);
+    letter-spacing:.06em; text-shadow:0 0 26px var(--accent-soft); min-width:130px;
+  }
+  .numpad-hint{ font-family:var(--font-mono); font-size:10.5px; color:var(--text-3); margin-top:4px; letter-spacing:.08em; text-transform:uppercase;}
+
+  /* ---------- Corner settings button ---------- */
+  .corner-btn{
+    position:fixed; bottom:20px; right:20px; z-index:22;
+    display:flex; align-items:center; gap:8px;
+    background:var(--panel-glass); border:1px solid var(--line); border-radius:100px;
+    padding:9px 14px 9px 10px; color:var(--text-2); font-family:var(--font-mono); font-size:11px;
+    letter-spacing:.05em; cursor:pointer; opacity:0; transform:translateY(6px);
+    transition:opacity .25s, transform .25s;
+  }
+  .corner-btn.visible{ opacity:1; transform:translateY(0); }
+  .corner-btn:hover{ color:var(--text-1); border-color:var(--text-3); }
+  .corner-btn svg{ width:15px; height:15px; }
+
+  /* ---------- Empty / error state on player ---------- */
+  .player-empty{
+    position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
+    flex-direction:column; gap:10px; z-index:5; color:var(--text-3);
+    font-family:var(--font-mono); font-size:12.5px; letter-spacing:.06em; text-align:center;
+  }
+  .player-empty[hidden]{display:none;}
+
+  @media (max-width:560px){
+    .osd-number{ font-size:38px; min-width:52px; }
+    .osd-name{ font-size:16px; }
+    .osd-logo{ width:46px; height:46px; }
+    .osd-inner{ padding:13px 16px; gap:14px;}
+    .numpad-digits{ font-size:42px; }
+    .modal-card{ padding:24px 20px 20px; }
   }
 
-  /* ---------- global loading ---------- */
-  #globalLoading {
-    position: fixed; inset: 0; z-index: 100;
-    display: flex; flex-direction: column; align-items: center; justify-content: center;
-    background: var(--bg); gap: 14px;
-  }
-  #globalLoading p { color: var(--text-dim); font-size: 13px; }
-  .spinner {
-    width: 26px; height: 26px;
-    border: 3px solid rgba(255,255,255,0.12); border-top-color: var(--glow);
-    border-radius: 50%; animation: spin .8s linear infinite;
-  }
-  @keyframes spin { to { transform: rotate(360deg); } }
-
-  /* ---------- setup screen ---------- */
-  #setupScreen {
-    position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
-    background:
-      radial-gradient(circle at 22% 18%, rgba(255,181,69,0.06) 0%, transparent 45%),
-      var(--bg);
-    padding: 24px;
-  }
-  .setup-card {
-    width: 100%; max-width: 400px; text-align: center;
-    background: var(--panel); border-radius: var(--radius-lg);
-    padding: 40px 28px 32px; border: 1px solid rgba(255,255,255,0.05);
-    box-shadow: 0 24px 60px rgba(0,0,0,0.45);
-  }
-  .setup-icon {
-    display: inline-block; padding: 12px 22px; font-size: 20px;
-    margin-bottom: 22px; animation: pulseGlow 2.3s ease-in-out infinite;
-  }
-  @keyframes pulseGlow { 0%, 100% { opacity: .5; } 50% { opacity: 1; } }
-  .setup-card h1 { font-size: 21px; font-weight: 700; margin: 0 0 8px; }
-  .setup-card p.lead { color: var(--text-dim); font-size: 14px; line-height: 1.55; margin: 0 0 26px; }
-  #setupForm { display: flex; flex-direction: column; gap: 12px; }
-  .field-input {
-    width: 100%; padding: 14px 16px; border-radius: var(--radius-md);
-    border: 1.5px solid rgba(255,255,255,0.1); background: var(--recessed);
-    color: var(--text); font-size: 15px; outline: none; transition: border-color .15s;
-  }
-  .field-input::placeholder { color: #565b64; }
-  .field-input:focus { border-color: var(--glow); }
-  .btn-primary {
-    padding: 14px 16px; border: none; border-radius: var(--radius-md);
-    background: var(--glow); color: #241505; font-weight: 700; font-size: 15px;
-    cursor: pointer; transition: transform .1s, opacity .15s;
-  }
-  .btn-primary:hover { opacity: .92; }
-  .btn-primary:active { transform: scale(0.98); }
-  .btn-primary:disabled { opacity: .55; cursor: default; }
-  .error-text { color: var(--danger); font-size: 13px; margin-top: 12px; line-height: 1.5; }
-  .setup-loading { margin-top: 16px; }
-
-  /* ---------- player ---------- */
-  #playerScreen { position: fixed; inset: 0; background: #000; }
-  #video { width: 100%; height: 100%; object-fit: contain; background: #000; transition: filter .35s ease; }
-  #video.tuning { filter: brightness(0.32) saturate(0.6); }
-
-  .unmute-hint {
-    position: absolute; bottom: 26px; left: 50%; transform: translateX(-50%);
-    background: rgba(12,14,18,0.85); padding: 9px 18px; border-radius: 100px;
-    font-size: 13px; color: var(--text-dim); z-index: 15; backdrop-filter: blur(8px);
-    border: 1px solid rgba(255,255,255,0.06);
-  }
-
-  /* OSD */
-  .osd {
-    position: absolute; top: 26px; left: 26px; z-index: 5;
-    display: flex; align-items: center; gap: 14px;
-    background: rgba(14,17,22,0.78); backdrop-filter: blur(16px);
-    border: 1px solid rgba(255,255,255,0.07); border-radius: var(--radius-md);
-    padding: 10px 20px 10px 10px; opacity: 0; transform: translateY(-6px) scale(.98);
-    transition: opacity .22s ease, transform .22s ease; max-width: 72vw;
-  }
-  .osd.show { opacity: 1; transform: translateY(0) scale(1); }
-  .osd-logo {
-    width: 50px; height: 50px; border-radius: var(--radius-sm); background: var(--panel-2);
-    display: flex; align-items: center; justify-content: center; overflow: hidden; flex-shrink: 0;
-  }
-  .osd-logo img { width: 100%; height: 100%; object-fit: contain; }
-  .osd-logo.fallback { font-size: 20px; font-weight: 700; color: var(--glow); font-family: var(--font-mono); }
-  .osd-number { font-size: 24px; padding: 3px 10px; display: inline-block; }
-  .osd-name { font-size: 14px; color: var(--text-dim); margin-top: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 48vw; }
-
-  /* Number entry HUD */
-  .number-hud {
-    position: absolute; top: 26px; right: 26px; z-index: 16;
-    padding: 12px 24px; font-size: 26px; min-width: 92px; text-align: center;
-  }
-  .number-hud.not-found { color: var(--danger); box-shadow: inset 0 2px 8px rgba(0,0,0,0.7), inset 0 0 0 1px rgba(255,107,87,0.35); text-shadow: 0 0 10px rgba(255,107,87,0.5); }
-
-  /* Toast */
-  .toast {
-    position: absolute; bottom: 90px; left: 50%; transform: translateX(-50%);
-    background: rgba(26,14,12,0.92); border: 1px solid rgba(255,107,87,0.4); color: #ffd9d2;
-    padding: 10px 18px; border-radius: 100px; font-size: 13px; z-index: 25; max-width: 80vw;
-    text-align: center;
-  }
-
-  /* Channel list */
-  .channel-list-overlay {
-    position: absolute; inset: 0; z-index: 10;
-    background: linear-gradient(90deg, rgba(10,12,16,0.97) 0%, rgba(10,12,16,0.95) 58%, rgba(10,12,16,0.4) 100%);
-    display: flex; flex-direction: column; padding-top: 30px; max-width: 540px;
-  }
-  .channel-list-header { display: flex; align-items: baseline; gap: 10px; padding: 0 30px 14px; }
-  .channel-list-header h2 { font-size: 18px; font-weight: 700; margin: 0; }
-  .channel-count { color: var(--text-dim); font-size: 12px; }
-  .channel-list-container { flex: 1; overflow-y: auto; padding: 0 18px 12px 30px; scrollbar-width: thin; }
-  .channel-row {
-    display: flex; align-items: center; gap: 14px; padding: 9px 14px;
-    border-radius: var(--radius-md); cursor: pointer; margin-bottom: 3px;
-    border-left: 3px solid transparent; transition: background .1s, border-color .1s, padding .1s;
-  }
-  .channel-row:hover { background: rgba(255,255,255,0.04); }
-  .channel-row.highlighted { background: var(--glow-dim); border-left-color: var(--glow); padding-left: 11px; }
-  .channel-row-logo {
-    width: 38px; height: 38px; border-radius: var(--radius-sm); background: var(--panel-2);
-    flex-shrink: 0; display: flex; align-items: center; justify-content: center; overflow: hidden;
-  }
-  .channel-row-logo img { width: 100%; height: 100%; object-fit: contain; }
-  .channel-row-logo.no-logo { font-weight: 700; color: var(--glow-mid); font-size: 15px; font-family: var(--font-mono); }
-  .channel-row-number {
-    font-family: var(--font-mono); color: var(--glow-mid); font-weight: 600;
-    font-variant-numeric: tabular-nums; font-size: 14px; min-width: 38px;
-  }
-  .channel-row.highlighted .channel-row-number { color: var(--glow); }
-  .channel-row-name { font-size: 14.5px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .channel-list-hint {
-    padding: 12px 30px; font-size: 11.5px; color: var(--text-dim);
-    border-top: 1px solid rgba(255,255,255,0.06); line-height: 1.6;
-  }
-
-  /* Settings button + modal */
-  .settings-btn {
-    position: absolute; top: 18px; right: 18px; z-index: 20;
-    width: 40px; height: 40px; border-radius: 50%;
-    background: rgba(20,24,32,0.55); border: 1px solid rgba(255,255,255,0.08);
-    color: var(--text-dim); cursor: pointer; display: flex; align-items: center; justify-content: center;
-    transition: background .15s, color .15s;
-  }
-  .settings-btn:hover { background: rgba(30,36,48,0.85); color: var(--text); }
-
-  .modal-backdrop {
-    position: fixed; inset: 0; z-index: 30; background: rgba(0,0,0,0.62); backdrop-filter: blur(4px);
-    display: flex; align-items: center; justify-content: center; padding: 20px;
-  }
-  .modal-card {
-    width: 100%; max-width: 400px; background: var(--panel); border-radius: var(--radius-lg);
-    padding: 26px; border: 1px solid rgba(255,255,255,0.06);
-  }
-  .modal-card h2 { font-size: 17px; margin: 0 0 16px; }
-  .modal-card label { display: block; font-size: 12.5px; color: var(--text-dim); margin-bottom: 6px; }
-  .modal-actions { display: flex; gap: 10px; margin-top: 18px; }
-  .btn-secondary {
-    flex: 1; padding: 12px; border-radius: var(--radius-md); border: 1.5px solid rgba(255,255,255,0.12);
-    background: transparent; color: var(--text); font-weight: 600; font-size: 14px; cursor: pointer;
-  }
-  .modal-actions .btn-primary { flex: 1.4; }
-  .btn-danger-link {
-    display: block; width: 100%; text-align: center; margin-top: 16px; background: none; border: none;
-    color: var(--danger); font-size: 12.5px; cursor: pointer; padding: 6px;
-  }
-
-  @media (max-width: 640px) {
-    .channel-list-overlay { max-width: 100%; }
-    .osd-name { max-width: 40vw; }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    * { animation: none !important; transition: none !important; }
-  }
+  ::selection{ background:var(--accent-soft); }
 </style>
 </head>
 <body>
-<div id="app">
 
-  <div id="globalLoading">
-    <div class="spinner"></div>
-    <p>Memuat...</p>
+<div id="stage">
+  <video id="video" playsinline></video>
+  <div class="player-empty" id="playerEmpty" hidden>
+    <div style="font-family:var(--font-display); font-size:15px; color:var(--text-2); letter-spacing:.02em;">TIDAK ADA SINYAL</div>
+    <div>Menunggu channel dipilih</div>
   </div>
+</div>
 
-  <section id="setupScreen" class="hidden">
-    <div class="setup-card">
-      <div class="tuner-display setup-icon" aria-hidden="true">– – –</div>
-      <h1>Selamat Datang</h1>
-      <p class="lead">Masukkan URL playlist M3U untuk mulai menonton. Playlist akan tersimpan otomatis untuk kunjungan berikutnya.</p>
-      <form id="setupForm">
-        <input type="text" id="setupUrlInput" class="field-input" placeholder="https://contoh.com/playlist.m3u"
-          autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" inputmode="url" />
-        <button type="submit" id="setupSubmitBtn" class="btn-primary">Muat Playlist</button>
-      </form>
-      <p id="setupError" class="error-text hidden"></p>
-      <div id="setupLoading" class="spinner setup-loading hidden"></div>
-    </div>
-  </section>
+<!-- Toast status -->
+<div class="toast" id="toast"><span class="toast-dot"></span><span id="toastText">—</span></div>
 
-  <section id="playerScreen" class="hidden">
-    <video id="video" playsinline></video>
+<!-- Autoplay gate -->
+<div class="autoplay-gate" id="autoplayGate" hidden>
+  <div class="autoplay-icon">▶</div>
+  <div class="autoplay-text">TEKAN TOMBOL APA SAJA UNTUK MULAI MENONTON</div>
+</div>
 
-    <div id="unmuteHint" class="unmute-hint hidden">🔇 Tekan tombol apa saja untuk suara</div>
-    <div id="toast" class="toast hidden"></div>
-
-    <div id="osd" class="osd hidden">
-      <div id="osdLogo" class="osd-logo"></div>
-      <div class="osd-info">
-        <span id="osdNumber" class="tuner-display osd-number"></span>
-        <div id="osdName" class="osd-name"></div>
+<!-- OSD channel banner -->
+<div class="osd" id="osd">
+  <div class="osd-inner">
+    <div class="osd-logo" id="osdLogo"><span class="osd-logo-fallback" id="osdLogoFallback">—</span></div>
+    <div class="osd-number" id="osdNumber">–</div>
+    <div class="osd-divider"></div>
+    <div class="osd-info">
+      <div class="osd-name" id="osdName">—</div>
+      <div class="osd-meta">
+        <span class="osd-live">LIVE</span>
+        <span class="osd-tag" id="osdGroup" hidden></span>
       </div>
     </div>
-
-    <div id="numberHud" class="tuner-display number-hud hidden">
-      <span id="numberHudText"></span>
-    </div>
-
-    <div id="channelListOverlay" class="channel-list-overlay hidden">
-      <div class="channel-list-header">
-        <h2>Daftar Channel</h2>
-        <span id="channelCount" class="channel-count"></span>
+    <div class="osd-right">
+      <div class="osd-clock" id="osdClock">--:--</div>
+      <div class="signal-bars">
+        <span class="bar" style="--i:0"></span>
+        <span class="bar" style="--i:1"></span>
+        <span class="bar" style="--i:2"></span>
+        <span class="bar" style="--i:3"></span>
+        <span class="bar" style="--i:4"></span>
       </div>
-      <div id="channelListContainer" class="channel-list-container"></div>
-      <div class="channel-list-hint">↑↓ Pilih &nbsp;•&nbsp; PgUp/PgDn Halaman &nbsp;•&nbsp; 0-9 Langsung ke Channel &nbsp;•&nbsp; Enter Tonton &nbsp;•&nbsp; Esc Tutup</div>
-    </div>
-
-    <button id="settingsBtn" class="settings-btn" title="Pengaturan" aria-label="Pengaturan">
-      <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-        <circle cx="12" cy="12" r="3"/>
-        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-      </svg>
-    </button>
-  </section>
-
-  <div id="settingsModal" class="modal-backdrop hidden">
-    <div class="modal-card">
-      <h2>Pengaturan Playlist</h2>
-      <label for="settingsUrlInput">URL Playlist M3U</label>
-      <input type="text" id="settingsUrlInput" class="field-input" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" inputmode="url" />
-      <p id="settingsError" class="error-text hidden"></p>
-      <div class="modal-actions">
-        <button id="settingsCancelBtn" class="btn-secondary">Batal</button>
-        <button id="settingsSaveBtn" class="btn-primary">Simpan &amp; Muat Ulang</button>
-      </div>
-      <button id="settingsResetBtn" class="btn-danger-link">Hapus Playlist &amp; Mulai Ulang</button>
     </div>
   </div>
+</div>
 
+<!-- Number entry overlay -->
+<div class="numpad-overlay" id="numpadOverlay">
+  <div class="numpad-box">
+    <div class="numpad-digits" id="numpadDigits">0</div>
+    <div class="numpad-hint">Pindah ke channel</div>
+  </div>
+</div>
+
+<!-- Corner settings button -->
+<button class="corner-btn" id="cornerBtn" title="Ganti playlist (S)">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.04 1.56V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 9 19.36a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.64 15a1.7 1.7 0 0 0-1.56-1.04H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.64 9a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.64a1.7 1.7 0 0 0 1.04-1.56V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1.04 1.56 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.36 9a1.7 1.7 0 0 0 1.56 1.04H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1.04z"/></svg>
+  Ganti Playlist
+</button>
+
+<!-- Boot / settings modal -->
+<div class="overlay" id="modalOverlay">
+  <div class="modal-card">
+    <button class="modal-close" id="modalCloseBtn" hidden>✕</button>
+    <div class="modal-eyebrow">TUNER</div>
+    <div class="modal-title" id="modalTitle">Masukkan Playlist M3U</div>
+    <p class="modal-sub" id="modalSub">Tempelkan URL playlist M3U/M3U8 kamu. Setelah berhasil dimuat, playlist ini akan tersimpan otomatis di perangkat ini.</p>
+    <label class="field-label" for="m3uUrl">URL Playlist</label>
+    <input class="field-input" id="m3uUrl" type="url" placeholder="https://contoh.com/playlist.m3u8" autocomplete="off" spellcheck="false">
+    <div class="modal-error" id="modalError"></div>
+    <div class="btn-row">
+      <button class="btn btn-primary" id="loadBtn">Mulai Menonton</button>
+    </div>
+    <div class="btn-row" id="resetRow" hidden>
+      <button class="btn btn-danger" id="resetBtn" style="flex:1;">Hapus Playlist Tersimpan</button>
+    </div>
+    <div class="control-legend">
+      <div class="legend-item"><span class="legend-key">▲ / PgUp</span> Channel naik</div>
+      <div class="legend-item"><span class="legend-key">▼ / PgDn</span> Channel turun</div>
+      <div class="legend-item"><span class="legend-key">0-9</span> Lompat ke nomor</div>
+      <div class="legend-item"><span class="legend-key">Enter</span> Konfirmasi</div>
+    </div>
+  </div>
 </div>
 
 <script>
-(function () {
-  'use strict';
+(function(){
+  "use strict";
 
-  var PAGE_JUMP = 10;
-  var NUMBER_ENTRY_TIMEOUT = 1500;
-  var OSD_TIMEOUT = 4000;
-  var PROXIES = [
-    'https://api.allorigins.win/raw?url=',
-    'https://api.codetabs.com/v1/proxy?quest='
-  ];
+  var LS_URL = 'tuner_playlist_url';
+  var LS_CHANNELS = 'tuner_channels';
+  var LS_LAST = 'tuner_last_channel_number';
+
+  var els = {
+    video: document.getElementById('video'),
+    playerEmpty: document.getElementById('playerEmpty'),
+    toast: document.getElementById('toast'),
+    toastText: document.getElementById('toastText'),
+    autoplayGate: document.getElementById('autoplayGate'),
+    osd: document.getElementById('osd'),
+    osdLogo: document.getElementById('osdLogo'),
+    osdLogoFallback: document.getElementById('osdLogoFallback'),
+    osdNumber: document.getElementById('osdNumber'),
+    osdName: document.getElementById('osdName'),
+    osdGroup: document.getElementById('osdGroup'),
+    osdClock: document.getElementById('osdClock'),
+    numpadOverlay: document.getElementById('numpadOverlay'),
+    numpadDigits: document.getElementById('numpadDigits'),
+    cornerBtn: document.getElementById('cornerBtn'),
+    modalOverlay: document.getElementById('modalOverlay'),
+    modalTitle: document.getElementById('modalTitle'),
+    modalSub: document.getElementById('modalSub'),
+    modalError: document.getElementById('modalError'),
+    modalCloseBtn: document.getElementById('modalCloseBtn'),
+    resetRow: document.getElementById('resetRow'),
+    resetBtn: document.getElementById('resetBtn'),
+    m3uUrl: document.getElementById('m3uUrl'),
+    loadBtn: document.getElementById('loadBtn')
+  };
 
   var state = {
     channels: [],
-    currentIndex: -1,
-    listOpen: false,
-    highlightIndex: 0,
+    currentIndex: 0,
     numberBuffer: '',
     numberTimer: null,
-    osdTimer: null,
-    toastTimer: null,
     hls: null,
-    playlistUrl: '',
-    hlsLoadingPromise: null
+    osdTimer: null,
+    cornerTimer: null,
+    hasChannels: false,
+    errorRetried: false
   };
 
-  var el = {
-    globalLoading: document.getElementById('globalLoading'),
-    setupScreen: document.getElementById('setupScreen'),
-    setupForm: document.getElementById('setupForm'),
-    setupUrlInput: document.getElementById('setupUrlInput'),
-    setupError: document.getElementById('setupError'),
-    setupLoading: document.getElementById('setupLoading'),
-    setupSubmitBtn: document.getElementById('setupSubmitBtn'),
+  /* ---------------- Utilities ---------------- */
 
-    playerScreen: document.getElementById('playerScreen'),
-    video: document.getElementById('video'),
-    unmuteHint: document.getElementById('unmuteHint'),
-    toast: document.getElementById('toast'),
-
-    osd: document.getElementById('osd'),
-    osdLogo: document.getElementById('osdLogo'),
-    osdNumber: document.getElementById('osdNumber'),
-    osdName: document.getElementById('osdName'),
-
-    numberHud: document.getElementById('numberHud'),
-    numberHudText: document.getElementById('numberHudText'),
-
-    channelListOverlay: document.getElementById('channelListOverlay'),
-    channelListContainer: document.getElementById('channelListContainer'),
-    channelCount: document.getElementById('channelCount'),
-
-    settingsBtn: document.getElementById('settingsBtn'),
-    settingsModal: document.getElementById('settingsModal'),
-    settingsUrlInput: document.getElementById('settingsUrlInput'),
-    settingsError: document.getElementById('settingsError'),
-    settingsSaveBtn: document.getElementById('settingsSaveBtn'),
-    settingsCancelBtn: document.getElementById('settingsCancelBtn'),
-    settingsResetBtn: document.getElementById('settingsResetBtn')
-  };
-
-  // ================= STORAGE (Claude artifact storage, fallback to localStorage) =================
-  var hasCloudStorage = typeof window.storage !== 'undefined' && window.storage && typeof window.storage.get === 'function';
-
-  function storageGet(key) {
-    if (hasCloudStorage) {
-      return window.storage.get(key, false).then(function (res) {
-        return res ? res.value : null;
-      }).catch(function () { return null; });
+  function toast(text, opts){
+    opts = opts || {};
+    els.toastText.textContent = text;
+    els.toast.classList.remove('error','pulse');
+    if(opts.error) els.toast.classList.add('error');
+    if(opts.pulse) els.toast.classList.add('pulse');
+    els.toast.classList.add('show');
+    clearTimeout(toast._t);
+    if(opts.sticky !== true){
+      toast._t = setTimeout(function(){ els.toast.classList.remove('show'); }, opts.duration || 2200);
     }
-    try { return Promise.resolve(localStorage.getItem(key)); }
-    catch (e) { return Promise.resolve(null); }
   }
-  function storageSet(key, value) {
-    if (hasCloudStorage) {
-      return window.storage.set(key, value, false).then(function () { return true; }).catch(function () { return false; });
-    }
-    try { localStorage.setItem(key, value); return Promise.resolve(true); }
-    catch (e) { return Promise.resolve(false); }
-  }
-  function storageDelete(key) {
-    if (hasCloudStorage) {
-      return window.storage.delete(key, false).catch(function () {});
-    }
-    try { localStorage.removeItem(key); } catch (e) {}
-    return Promise.resolve();
-  }
+  function hideToast(){ els.toast.classList.remove('show'); }
 
-  // ================= M3U PARSER =================
-  function splitExtinf(line) {
-    var rest = line.slice('#EXTINF:'.length);
-    var i = 0;
-    while (i < rest.length && /[-\d.]/.test(rest[i])) i++;
-    var inQuotes = false, commaIdx = -1;
-    for (var j = i; j < rest.length; j++) {
-      var c = rest[j];
-      if (c === '"') inQuotes = !inQuotes;
-      else if (c === ',' && !inQuotes) { commaIdx = j; break; }
-    }
-    if (commaIdx === -1) return { attrStr: rest.slice(i), title: '' };
-    return { attrStr: rest.slice(i, commaIdx), title: rest.slice(commaIdx + 1).trim() };
+  function updateClock(){
+    var d = new Date();
+    var h = String(d.getHours()).padStart(2,'0');
+    var m = String(d.getMinutes()).padStart(2,'0');
+    els.osdClock.textContent = h + ':' + m;
   }
+  setInterval(updateClock, 15000);
+  updateClock();
 
-  function parseM3U(content) {
-    var lines = content.split(/\r?\n/);
+  /* ---------------- M3U parsing ---------------- */
+
+  function parseM3U(text){
+    var lines = text.split(/\r?\n/);
     var channels = [];
-    var pending = null;
+    var current = null;
+    var attrRegex = /([a-zA-Z0-9_-]+)="([^"]*)"/g;
 
-    for (var k = 0; k < lines.length; k++) {
-      var line = lines[k].trim();
-      if (!line) continue;
-      if (line.indexOf('#EXTINF') === 0) {
-        var parts = splitExtinf(line);
-        var attrs = {};
-        var attrRe = /([a-zA-Z0-9_-]+)="([^"]*)"/g;
-        var am;
-        while ((am = attrRe.exec(parts.attrStr)) !== null) {
-          attrs[am[1].toLowerCase()] = am[2];
-        }
-        var title = parts.title || '';
-        pending = {
-          name: title || attrs['tvg-name'] || 'Tanpa Nama',
-          logo: attrs['tvg-logo'] || attrs['tvg-logo-small'] || '',
-          chno: attrs['tvg-chno'] || '',
-          group: attrs['group-title'] || '',
-          id: attrs['tvg-id'] || ''
-        };
-      } else if (line.charAt(0) === '#') {
-        continue;
-      } else {
-        if (pending) {
-          pending.url = line;
-          channels.push(pending);
-          pending = null;
-        }
-      }
-    }
-
-    var used = {};
-    channels.forEach(function (c) {
-      var n = parseInt(c.chno, 10);
-      if (!isNaN(n) && n > 0) used[n] = true;
-    });
-    var auto = 1;
-    channels.forEach(function (c) {
-      var n = parseInt(c.chno, 10);
-      if (isNaN(n) || n <= 0) {
-        while (used[auto]) auto++;
-        n = auto;
-        used[n] = true;
-      }
-      c.chno = n;
-    });
-
-    channels.sort(function (a, b) { return a.chno - b.chno; });
-    return channels;
-  }
-
-  // ================= FETCH WITH TIMEOUT + CORS FALLBACK =================
-  function fetchWithTimeout(url, timeoutMs) {
-    var controller = new AbortController();
-    var id = setTimeout(function () { controller.abort(); }, timeoutMs);
-    return fetch(url, { cache: 'no-store', signal: controller.signal }).finally(function () {
-      clearTimeout(id);
-    });
-  }
-
-  function fetchM3UText(url) {
-    var attempts = [function () { return fetchWithTimeout(url, 8000); }];
-    PROXIES.forEach(function (p) {
-      attempts.push(function () { return fetchWithTimeout(p + encodeURIComponent(url), 10000); });
-    });
-
-    var lastErr = null;
-    return attempts.reduce(function (chain, attempt) {
-      return chain.then(function (result) {
-        if (result) return result;
-        return attempt().then(function (res) {
-          if (res && res.ok) {
-            return res.text().then(function (text) {
-              return (text && text.trim().length > 0) ? text : null;
-            });
+    for(var i=0;i<lines.length;i++){
+      var line = lines[i].trim();
+      if(!line) continue;
+      if(line.charAt(0) === '#'){
+        if(line.toUpperCase().indexOf('#EXTINF') === 0){
+          var attrs = {};
+          var m;
+          attrRegex.lastIndex = 0;
+          while((m = attrRegex.exec(line))){
+            attrs[m[1].toLowerCase()] = m[2];
           }
-          return null;
-        }).catch(function (e) { lastErr = e; return null; });
-      });
-    }, Promise.resolve(null)).then(function (result) {
-      if (result) return result;
-      throw lastErr || new Error('Semua percobaan mengambil playlist gagal');
-    });
-  }
-
-  // ================= HLS LOADER =================
-  function loadScript(src) {
-    return new Promise(function (resolve, reject) {
-      var s = document.createElement('script');
-      s.src = src;
-      s.onload = function () { resolve(); };
-      s.onerror = function () { reject(new Error('load failed: ' + src)); };
-      document.head.appendChild(s);
-    });
-  }
-  function ensureHls() {
-    if (window.Hls) return Promise.resolve(true);
-    if (state.hlsLoadingPromise) return state.hlsLoadingPromise;
-    state.hlsLoadingPromise = loadScript('https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.5.13/hls.min.js')
-      .catch(function () {
-        return loadScript('https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js');
-      })
-      .then(function () { return !!window.Hls; })
-      .catch(function () { return false; });
-    return state.hlsLoadingPromise;
-  }
-
-  // ================= PLAYBACK =================
-  function tuningEffect() {
-    el.video.classList.add('tuning');
-    setTimeout(function () { el.video.classList.remove('tuning'); }, 140);
-  }
-
-  function attemptPlay() {
-    var p = el.video.play();
-    if (p && typeof p.catch === 'function') {
-      p.catch(function () {
-        el.video.muted = true;
-        el.unmuteHint.classList.remove('hidden');
-        el.video.play().catch(function () {});
-      });
-    }
-  }
-
-  function unmuteOnFirstInteraction() {
-    if (el.video.muted) el.video.muted = false;
-    el.unmuteHint.classList.add('hidden');
-  }
-
-  function playChannelByIndex(idx) {
-    if (idx < 0 || idx >= state.channels.length) return;
-    state.currentIndex = idx;
-    var ch = state.channels[idx];
-    var video = el.video;
-
-    tuningEffect();
-
-    if (state.hls) {
-      try { state.hls.destroy(); } catch (e) {}
-      state.hls = null;
-    }
-    video.pause();
-    video.removeAttribute('src');
-    video.load();
-
-    var url = ch.url;
-    var isM3u8 = /\.m3u8(\?|#|$)/i.test(url);
-
-    if (isM3u8 && !video.canPlayType('application/vnd.apple.mpegurl')) {
-      ensureHls().then(function (ok) {
-        if (ok && window.Hls && window.Hls.isSupported()) {
-          var hls = new window.Hls({ enableWorker: true });
-          state.hls = hls;
-          hls.on(window.Hls.Events.MANIFEST_PARSED, function () { attemptPlay(); });
-          hls.on(window.Hls.Events.ERROR, function (evt, data) {
-            if (data && data.fatal) {
-              showToast('Gagal memutar channel ini. Coba channel lain.');
-            }
-          });
-          hls.loadSource(url);
-          hls.attachMedia(video);
-        } else {
-          video.src = url;
-          attemptPlay();
+          var commaIdx = line.indexOf(',');
+          var name = commaIdx >= 0 ? line.slice(commaIdx+1).trim() : 'Tanpa Nama';
+          var chno = null;
+          if(attrs['tvg-chno'] && /^\d+$/.test(attrs['tvg-chno'])){
+            chno = parseInt(attrs['tvg-chno'],10);
+          } else if(attrs['tvg-id'] && /^\d+$/.test(attrs['tvg-id'])){
+            chno = parseInt(attrs['tvg-id'],10);
+          }
+          current = {
+            name: name || 'Tanpa Nama',
+            logo: attrs['tvg-logo'] || '',
+            group: attrs['group-title'] || '',
+            number: chno
+          };
         }
-      });
-    } else {
-      video.src = url;
-      attemptPlay();
+        continue;
+      }
+      if(current){
+        current.url = line;
+        channels.push(current);
+        current = null;
+      }
     }
-
-    showOSD(ch);
-    saveLastChannel(ch.chno);
+    return assignNumbers(channels);
   }
 
-  el.video.addEventListener('error', function () {
-    if (!state.hls) showToast('Gagal memutar channel ini. Format mungkin tidak didukung.');
+  function assignNumbers(raw){
+    var used = {};
+    raw.forEach(function(ch){
+      if(ch.number !== null && ch.number !== undefined && !used[ch.number]){
+        used[ch.number] = true;
+      } else {
+        ch.number = null;
+      }
+    });
+    var next = 1;
+    raw.forEach(function(ch){
+      if(ch.number === null){
+        while(used[next]) next++;
+        ch.number = next;
+        used[next] = true;
+      }
+    });
+    raw.sort(function(a,b){ return a.number - b.number; });
+    return raw;
+  }
+
+  /* ---------------- Fetching playlist ---------------- */
+
+  function fetchPlaylist(url){
+    return fetch(url, {cache:'no-store'}).then(function(res){
+      if(!res.ok) throw new Error('HTTP ' + res.status);
+      return res.text();
+    }).catch(function(){
+      var proxied = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(url);
+      return fetch(proxied).then(function(res){
+        if(!res.ok) throw new Error('Proxy HTTP ' + res.status);
+        return res.text();
+      });
+    });
+  }
+
+  /* ---------------- Storage ---------------- */
+
+  function persistPlaylist(url, channels){
+    try{
+      localStorage.setItem(LS_URL, url);
+      localStorage.setItem(LS_CHANNELS, JSON.stringify(channels));
+    }catch(e){ /* storage unavailable, ignore */ }
+  }
+  function loadPersisted(){
+    try{
+      var url = localStorage.getItem(LS_URL);
+      var raw = localStorage.getItem(LS_CHANNELS);
+      if(!url || !raw) return null;
+      var channels = JSON.parse(raw);
+      if(!Array.isArray(channels) || channels.length === 0) return null;
+      return { url: url, channels: channels };
+    }catch(e){ return null; }
+  }
+  function clearPersisted(){
+    try{
+      localStorage.removeItem(LS_URL);
+      localStorage.removeItem(LS_CHANNELS);
+      localStorage.removeItem(LS_LAST);
+    }catch(e){}
+  }
+
+  /* ---------------- Modal (boot / settings) ---------------- */
+
+  function openModal(mode){
+    state.modalMode = mode;
+    if(mode === 'boot'){
+      els.modalTitle.textContent = 'Masukkan Playlist M3U';
+      els.modalSub.textContent = 'Tempelkan URL playlist M3U/M3U8 kamu. Setelah berhasil dimuat, playlist ini akan tersimpan otomatis di perangkat ini dan langsung diputar.';
+      els.loadBtn.textContent = 'Mulai Menonton';
+      els.modalCloseBtn.hidden = true;
+      els.resetRow.hidden = true;
+    } else {
+      els.modalTitle.textContent = 'Ganti Playlist';
+      els.modalSub.textContent = 'Masukkan URL playlist baru untuk menggantikan playlist yang sedang aktif.';
+      els.loadBtn.textContent = 'Simpan & Muat Ulang';
+      els.modalCloseBtn.hidden = false;
+      els.resetRow.hidden = false;
+      els.m3uUrl.value = (localStorage.getItem(LS_URL) || '');
+    }
+    els.modalError.textContent = '';
+    els.modalOverlay.hidden = false;
+    setTimeout(function(){ els.m3uUrl.focus(); }, 50);
+  }
+  function closeModal(){
+    if(state.modalMode === 'boot' && !state.hasChannels) return; // must load a playlist first
+    els.modalOverlay.hidden = true;
+  }
+
+  els.modalCloseBtn.addEventListener('click', closeModal);
+  els.cornerBtn.addEventListener('click', function(){ openModal('settings'); });
+  els.resetBtn.addEventListener('click', function(){
+    clearPersisted();
+    location.reload();
   });
 
-  function saveLastChannel(chno) {
-    storageSet('m3u_last_channel', String(chno));
+  function setLoadBtnBusy(busy){
+    els.loadBtn.disabled = busy;
+    els.loadBtn.textContent = busy ? 'Memuat…' : (state.modalMode === 'boot' ? 'Mulai Menonton' : 'Simpan & Muat Ulang');
   }
 
-  // ================= OSD =================
-  function setOsdLogo(ch) {
-    el.osdLogo.innerHTML = '';
-    el.osdLogo.classList.remove('fallback');
-    if (ch.logo) {
-      var img = document.createElement('img');
-      img.src = ch.logo;
-      img.alt = '';
-      img.onerror = function () {
-        el.osdLogo.innerHTML = '';
-        el.osdLogo.classList.add('fallback');
-        el.osdLogo.textContent = (ch.name || '?').trim().charAt(0).toUpperCase() || '?';
-      };
-      el.osdLogo.appendChild(img);
-    } else {
-      el.osdLogo.classList.add('fallback');
-      el.osdLogo.textContent = (ch.name || '?').trim().charAt(0).toUpperCase() || '?';
+  els.loadBtn.addEventListener('click', function(){
+    var url = els.m3uUrl.value.trim();
+    els.modalError.textContent = '';
+    if(!url){
+      els.modalError.textContent = 'URL playlist tidak boleh kosong.';
+      return;
     }
-  }
+    setLoadBtnBusy(true);
+    fetchPlaylist(url).then(function(text){
+      var channels = parseM3U(text);
+      if(channels.length === 0){
+        throw new Error('Playlist tidak berisi channel yang valid (format M3U tidak dikenali).');
+      }
+      persistPlaylist(url, channels);
+      state.channels = channels;
+      state.hasChannels = true;
+      els.modalOverlay.hidden = true;
+      var lastNum = parseInt(localStorage.getItem(LS_LAST) || '', 10);
+      var idx = channels.findIndex(function(c){ return c.number === lastNum; });
+      startPlayback(idx >= 0 ? idx : 0);
+    }).catch(function(err){
+      els.modalError.textContent = err.message || 'Gagal memuat playlist.';
+    }).finally(function(){
+      setLoadBtnBusy(false);
+    });
+  });
 
-  function showOSD(ch) {
-    el.osdNumber.textContent = String(ch.chno).padStart(3, '0');
-    el.osdName.textContent = ch.name;
-    setOsdLogo(ch);
-    el.osd.classList.remove('hidden');
-    requestAnimationFrame(function () { el.osd.classList.add('show'); });
+  els.m3uUrl.addEventListener('keydown', function(e){
+    if(e.key === 'Enter') els.loadBtn.click();
+    e.stopPropagation();
+  });
+
+  /* ---------------- Corner button visibility ---------------- */
+
+  function pokeCornerBtn(){
+    els.cornerBtn.classList.add('visible');
+    clearTimeout(state.cornerTimer);
+    state.cornerTimer = setTimeout(function(){
+      els.cornerBtn.classList.remove('visible');
+    }, 3500);
+  }
+  document.addEventListener('mousemove', pokeCornerBtn);
+  document.addEventListener('touchstart', pokeCornerBtn, {passive:true});
+
+  /* ---------------- OSD ---------------- */
+
+  function showOSD(ch){
+    els.osdNumber.textContent = ch.number;
+    els.osdName.textContent = ch.name;
+    if(ch.group){
+      els.osdGroup.textContent = ch.group;
+      els.osdGroup.hidden = false;
+    } else {
+      els.osdGroup.hidden = true;
+    }
+    if(ch.logo){
+      els.osdLogo.innerHTML = '<img src="' + ch.logo.replace(/"/g,'&quot;') + '" alt="">';
+    } else {
+      els.osdLogo.innerHTML = '<span class="osd-logo-fallback">' + (ch.name || '?').trim().charAt(0).toUpperCase() + '</span>';
+    }
+    updateClock();
+    els.osd.classList.remove('show');
+    void els.osd.offsetWidth; // restart animation
+    els.osd.classList.add('show');
     clearTimeout(state.osdTimer);
-    state.osdTimer = setTimeout(function () {
-      el.osd.classList.remove('show');
-      setTimeout(function () { el.osd.classList.add('hidden'); }, 250);
-    }, OSD_TIMEOUT);
+    state.osdTimer = setTimeout(function(){ els.osd.classList.remove('show'); }, 4200);
   }
-
-  // ================= TOAST =================
-  function showToast(msg) {
-    el.toast.textContent = msg;
-    el.toast.classList.remove('hidden');
-    clearTimeout(state.toastTimer);
-    state.toastTimer = setTimeout(function () { el.toast.classList.add('hidden'); }, 3000);
-  }
-
-  // ================= CHANNEL LIST =================
-  function createChannelRow(ch, i) {
-    var row = document.createElement('div');
-    row.className = 'channel-row';
-    row.dataset.index = String(i);
-
-    var logoWrap = document.createElement('div');
-    logoWrap.className = 'channel-row-logo';
-    if (ch.logo) {
-      var img = document.createElement('img');
-      img.src = ch.logo;
-      img.alt = '';
-      img.loading = 'lazy';
-      img.onerror = function () {
-        logoWrap.innerHTML = '';
-        logoWrap.classList.add('no-logo');
-        logoWrap.textContent = (ch.name || '?').trim().charAt(0).toUpperCase() || '?';
-      };
-      logoWrap.appendChild(img);
+  function toggleOSD(){
+    var ch = state.channels[state.currentIndex];
+    if(!ch) return;
+    if(els.osd.classList.contains('show')){
+      els.osd.classList.remove('show');
+      clearTimeout(state.osdTimer);
     } else {
-      logoWrap.classList.add('no-logo');
-      logoWrap.textContent = (ch.name || '?').trim().charAt(0).toUpperCase() || '?';
+      showOSD(ch);
     }
-
-    var numberEl = document.createElement('div');
-    numberEl.className = 'channel-row-number';
-    numberEl.textContent = String(ch.chno).padStart(3, '0');
-
-    var nameEl = document.createElement('div');
-    nameEl.className = 'channel-row-name';
-    nameEl.textContent = ch.name;
-
-    row.appendChild(logoWrap);
-    row.appendChild(numberEl);
-    row.appendChild(nameEl);
-
-    row.addEventListener('click', function (e) {
-      e.stopPropagation();
-      state.highlightIndex = i;
-      confirmSelection();
-    });
-
-    return row;
   }
 
-  function renderChannelList() {
-    el.channelListContainer.innerHTML = '';
-    el.channelCount.textContent = state.channels.length + ' channel';
-    var frag = document.createDocumentFragment();
-    state.channels.forEach(function (ch, i) { frag.appendChild(createChannelRow(ch, i)); });
-    el.channelListContainer.appendChild(frag);
-    updateHighlightUI();
-  }
+  /* ---------------- Number entry ---------------- */
 
-  function updateHighlightUI() {
-    var rows = el.channelListContainer.children;
-    for (var i = 0; i < rows.length; i++) {
-      rows[i].classList.toggle('highlighted', i === state.highlightIndex);
-    }
-    var active = rows[state.highlightIndex];
-    if (active) active.scrollIntoView({ block: 'nearest' });
+  function showNumpad(buffer){
+    els.numpadDigits.textContent = buffer;
+    els.numpadOverlay.classList.add('show');
   }
-
-  function openList() {
-    state.listOpen = true;
-    state.highlightIndex = state.currentIndex >= 0 ? state.currentIndex : 0;
-    el.channelListOverlay.classList.remove('hidden');
-    updateHighlightUI();
+  function hideNumpad(){
+    els.numpadOverlay.classList.remove('show');
   }
-  function closeList() {
-    state.listOpen = false;
-    el.channelListOverlay.classList.add('hidden');
-  }
-  function moveHighlight(delta) {
-    var n = state.channels.length;
-    if (n === 0) return;
-    state.highlightIndex = Math.min(n - 1, Math.max(0, state.highlightIndex + delta));
-    updateHighlightUI();
-  }
-  function confirmSelection() {
-    playChannelByIndex(state.highlightIndex);
-    closeList();
-  }
-  function getPageSize() {
-    var container = el.channelListContainer;
-    var row = container.querySelector('.channel-row');
-    if (!row) return 5;
-    var rowHeight = row.getBoundingClientRect().height || 52;
-    var visible = Math.floor(container.clientHeight / rowHeight);
-    return Math.max(2, visible);
-  }
-
-  function changeChannel(delta) {
-    if (state.channels.length === 0) return;
-    var idx = Math.min(state.channels.length - 1, Math.max(0, state.currentIndex + delta));
-    playChannelByIndex(idx);
-  }
-
-  // ================= NUMBER ENTRY =================
-  function handleDigit(d) {
-    state.numberBuffer += d;
-    if (state.numberBuffer.length > 4) state.numberBuffer = state.numberBuffer.slice(-4);
-    el.numberHudText.textContent = state.numberBuffer;
-    el.numberHud.classList.remove('hidden', 'not-found');
+  function handleDigit(d){
     clearTimeout(state.numberTimer);
-    state.numberTimer = setTimeout(confirmNumberEntry, NUMBER_ENTRY_TIMEOUT);
+    state.numberBuffer = (state.numberBuffer + d).slice(-4);
+    showNumpad(state.numberBuffer);
+    state.numberTimer = setTimeout(commitNumberBuffer, 1300);
   }
-  function confirmNumberEntry() {
-    clearTimeout(state.numberTimer);
-    var num = parseInt(state.numberBuffer, 10);
+  function commitNumberBuffer(){
+    var buf = state.numberBuffer;
     state.numberBuffer = '';
-    el.numberHud.classList.add('hidden');
-    if (isNaN(num)) return;
-    var idx = state.channels.findIndex(function (c) { return c.chno === num; });
-    if (idx >= 0) {
-      playChannelByIndex(idx);
-      if (state.listOpen) { state.highlightIndex = idx; updateHighlightUI(); }
-      closeList();
+    hideNumpad();
+    if(!buf) return;
+    var num = parseInt(buf, 10);
+    var idx = state.channels.findIndex(function(c){ return c.number === num; });
+    if(idx >= 0){
+      startPlayback(idx);
     } else {
-      flashNotFound(num);
-    }
-  }
-  function cancelNumberEntry() {
-    clearTimeout(state.numberTimer);
-    state.numberBuffer = '';
-    el.numberHud.classList.add('hidden');
-  }
-  function flashNotFound(num) {
-    el.numberHudText.textContent = String(num).padStart(3, '0') + ' ?';
-    el.numberHud.classList.remove('hidden');
-    el.numberHud.classList.add('not-found');
-    setTimeout(function () {
-      el.numberHud.classList.add('hidden');
-      el.numberHud.classList.remove('not-found');
-    }, 1200);
-  }
-
-  // ================= KEYBOARD (keyboard & smart TV remote) =================
-  function onKeyDown(e) {
-    if (!el.settingsModal.classList.contains('hidden')) {
-      if (e.key === 'Escape') { closeSettings(); e.preventDefault(); }
-      return;
-    }
-    if (!el.setupScreen.classList.contains('hidden')) return;
-
-    unmuteOnFirstInteraction();
-
-    if (/^[0-9]$/.test(e.key)) {
-      handleDigit(e.key);
-      e.preventDefault();
-      return;
-    }
-
-    switch (e.key) {
-      case 'ArrowUp':
-        if (state.listOpen) moveHighlight(-1); else changeChannel(-1);
-        e.preventDefault(); break;
-      case 'ArrowDown':
-        if (state.listOpen) moveHighlight(1); else changeChannel(1);
-        e.preventDefault(); break;
-      case 'PageUp':
-        if (state.listOpen) moveHighlight(-getPageSize()); else changeChannel(-PAGE_JUMP);
-        e.preventDefault(); break;
-      case 'PageDown':
-        if (state.listOpen) moveHighlight(getPageSize()); else changeChannel(PAGE_JUMP);
-        e.preventDefault(); break;
-      case 'Enter':
-        if (state.numberBuffer) confirmNumberEntry();
-        else if (state.listOpen) confirmSelection();
-        else openList();
-        e.preventDefault(); break;
-      case 'Escape':
-      case 'Backspace':
-        if (state.numberBuffer) cancelNumberEntry();
-        else if (state.listOpen) closeList();
-        e.preventDefault(); break;
+      toast('Channel ' + num + ' tidak ditemukan', {error:true});
     }
   }
 
-  // ================= SETTINGS =================
-  function openSettings() {
-    el.settingsUrlInput.value = state.playlistUrl;
-    el.settingsError.classList.add('hidden');
-    el.settingsModal.classList.remove('hidden');
-    el.settingsUrlInput.focus();
-  }
-  function closeSettings() {
-    el.settingsModal.classList.add('hidden');
-  }
-  function showSettingsError(msg) {
-    el.settingsError.textContent = msg;
-    el.settingsError.classList.remove('hidden');
-  }
-  function saveSettings() {
-    var url = el.settingsUrlInput.value.trim();
-    if (!url) { showSettingsError('URL tidak boleh kosong.'); return; }
-    el.settingsSaveBtn.disabled = true;
-    el.settingsSaveBtn.textContent = 'Memuat...';
-    fetchM3UText(url).then(function (text) {
-      var channels = parseM3U(text);
-      if (channels.length === 0) throw new Error('empty');
-      state.channels = channels;
-      state.playlistUrl = url;
-      return Promise.all([
-        storageSet('m3u_playlist_url', url),
-        storageSet('m3u_playlist_channels', JSON.stringify(channels))
-      ]);
-    }).then(function () {
-      renderChannelList();
-      closeSettings();
-      playChannelByIndex(0);
-      openList();
-    }).catch(function () {
-      showSettingsError('Gagal memuat playlist. Periksa URL, atau sumber mungkin memblokir akses langsung.');
-    }).finally(function () {
-      el.settingsSaveBtn.disabled = false;
-      el.settingsSaveBtn.textContent = 'Simpan & Muat Ulang';
-    });
-  }
-  function resetPlaylist() {
-    Promise.all([
-      storageDelete('m3u_playlist_url'),
-      storageDelete('m3u_playlist_channels'),
-      storageDelete('m3u_last_channel')
-    ]).then(function () { location.reload(); });
+  /* ---------------- Playback ---------------- */
+
+  function cleanupHls(){
+    if(state.hls){
+      try{ state.hls.destroy(); }catch(e){}
+      state.hls = null;
+    }
   }
 
-  // ================= SETUP SCREEN =================
-  function showSetupError(msg) {
-    el.setupError.textContent = msg;
-    el.setupError.classList.remove('hidden');
+  function handleAutoplayBlock(){
+    els.autoplayGate.hidden = false;
   }
-  function setSetupLoading(loading) {
-    el.setupSubmitBtn.disabled = loading;
-    el.setupLoading.classList.toggle('hidden', !loading);
-    el.setupSubmitBtn.textContent = loading ? 'Memuat...' : 'Muat Playlist';
-    if (loading) el.setupError.classList.add('hidden');
+  function dismissAutoplayGate(){
+    if(!els.autoplayGate.hidden){
+      els.autoplayGate.hidden = true;
+      els.video.play().catch(function(){});
+    }
   }
-  function showPlayerScreen() {
-    el.setupScreen.classList.add('hidden');
-    el.playerScreen.classList.remove('hidden');
-  }
-  function handleSetupSubmit(e) {
-    e.preventDefault();
-    var url = el.setupUrlInput.value.trim();
-    if (!url) { showSetupError('Masukkan URL playlist terlebih dahulu.'); return; }
-    setSetupLoading(true);
-    fetchM3UText(url).then(function (text) {
-      var channels = parseM3U(text);
-      if (channels.length === 0) throw new Error('empty');
-      state.channels = channels;
-      state.playlistUrl = url;
-      return Promise.all([
-        storageSet('m3u_playlist_url', url),
-        storageSet('m3u_playlist_channels', JSON.stringify(channels))
-      ]);
-    }).then(function () {
-      showPlayerScreen();
-      renderChannelList();
-      playChannelByIndex(0);
-      openList();
-    }).catch(function () {
-      showSetupError('Gagal memuat playlist. Periksa URL, atau sumber mungkin memblokir akses langsung.');
-    }).finally(function () {
-      setSetupLoading(false);
-    });
+  els.autoplayGate.addEventListener('click', dismissAutoplayGate);
+
+  function handlePlaybackError(){
+    els.playerEmpty.hidden = false;
+    if(!state.errorRetried){
+      state.errorRetried = true;
+      toast('Sinyal terputus, mencoba ulang…', {error:true, sticky:true});
+      setTimeout(function(){
+        var ch = state.channels[state.currentIndex];
+        if(ch) setupPlayer(ch.url);
+      }, 1800);
+    } else {
+      toast('Channel ini tidak dapat diputar', {error:true, duration:3500});
+    }
   }
 
-  // ================= INIT =================
-  function wireEvents() {
-    el.setupForm.addEventListener('submit', handleSetupSubmit);
-    el.settingsBtn.addEventListener('click', function (e) { e.stopPropagation(); openSettings(); });
-    el.settingsCancelBtn.addEventListener('click', closeSettings);
-    el.settingsSaveBtn.addEventListener('click', saveSettings);
-    el.settingsUrlInput.addEventListener('keydown', function (e) {
-      if (e.key === 'Enter') { e.preventDefault(); saveSettings(); }
-    });
-    el.settingsResetBtn.addEventListener('click', function () {
-      if (confirm('Hapus playlist tersimpan dan mulai ulang?')) resetPlaylist();
-    });
-    document.addEventListener('keydown', onKeyDown);
-    el.video.addEventListener('click', function () { if (!state.listOpen) openList(); });
-    document.addEventListener('click', unmuteOnFirstInteraction, { once: true });
-  }
+  function setupPlayer(url){
+    cleanupHls();
+    state.errorRetried = false;
+    els.playerEmpty.hidden = true;
+    els.video.removeAttribute('src');
+    els.video.load();
+    toast('Memuat channel…', {pulse:true, sticky:true});
 
-  function init() {
-    wireEvents();
+    var isHls = /\.m3u8(\?|$)/i.test(url);
 
-    Promise.all([storageGet('m3u_playlist_url'), storageGet('m3u_playlist_channels')])
-      .then(function (results) {
-        var storedUrl = results[0];
-        var storedChannelsRaw = results[1];
-        el.globalLoading.classList.add('hidden');
-
-        var cachedChannels = [];
-        if (storedChannelsRaw) {
-          try { cachedChannels = JSON.parse(storedChannelsRaw); } catch (e) { cachedChannels = []; }
-        }
-
-        if (storedUrl && cachedChannels && cachedChannels.length > 0) {
-          state.channels = cachedChannels;
-          state.playlistUrl = storedUrl;
-          showPlayerScreen();
-          renderChannelList();
-
-          storageGet('m3u_last_channel').then(function (lastChno) {
-            var startIdx = 0;
-            if (lastChno) {
-              var found = state.channels.findIndex(function (c) { return String(c.chno) === String(lastChno); });
-              if (found >= 0) startIdx = found;
-            }
-            playChannelByIndex(startIdx);
-            openList();
-          });
-
-          fetchM3UText(storedUrl).then(function (text) {
-            var fresh = parseM3U(text);
-            if (fresh.length > 0) {
-              state.channels = fresh;
-              storageSet('m3u_playlist_channels', JSON.stringify(fresh));
-              if (!state.listOpen) return;
-              renderChannelList();
-            }
-          }).catch(function () { /* keep using cached playlist */ });
-        } else {
-          el.setupScreen.classList.remove('hidden');
-        }
+    if(window.Hls && Hls.isSupported() && isHls){
+      var hls = new Hls({ maxBufferLength: 30, liveDurationInfinity:true });
+      state.hls = hls;
+      hls.loadSource(url);
+      hls.attachMedia(els.video);
+      hls.on(Hls.Events.MANIFEST_PARSED, function(){
+        hideToast();
+        els.video.play().catch(handleAutoplayBlock);
       });
+      hls.on(Hls.Events.ERROR, function(evt, data){
+        if(data && data.fatal) handlePlaybackError();
+      });
+    } else {
+      els.video.src = url;
+      var onReady = function(){
+        hideToast();
+        els.video.play().catch(handleAutoplayBlock);
+        els.video.removeEventListener('loadedmetadata', onReady);
+      };
+      els.video.addEventListener('loadedmetadata', onReady);
+      els.video.addEventListener('error', handlePlaybackError, {once:true});
+    }
   }
 
-  init();
+  function startPlayback(idx){
+    var ch = state.channels[idx];
+    if(!ch) return;
+    state.currentIndex = idx;
+    try{ localStorage.setItem(LS_LAST, String(ch.number)); }catch(e){}
+    setupPlayer(ch.url);
+    showOSD(ch);
+  }
+
+  function nextChannel(){
+    if(state.channels.length === 0) return;
+    startPlayback((state.currentIndex + 1) % state.channels.length);
+  }
+  function prevChannel(){
+    if(state.channels.length === 0) return;
+    startPlayback((state.currentIndex - 1 + state.channels.length) % state.channels.length);
+  }
+
+  /* ---------------- Keyboard / remote control ---------------- */
+
+  window.addEventListener('keydown', function(e){
+    dismissAutoplayGate();
+
+    if(!els.modalOverlay.hidden){
+      return; // modal handles its own keys
+    }
+
+    var k = e.key;
+
+    if(k === 'PageUp' || k === 'ArrowUp' || k === 'ChannelUp' || e.keyCode === 33){
+      e.preventDefault(); nextChannel(); return;
+    }
+    if(k === 'PageDown' || k === 'ArrowDown' || k === 'ChannelDown' || e.keyCode === 34){
+      e.preventDefault(); prevChannel(); return;
+    }
+    if(/^[0-9]$/.test(k)){
+      handleDigit(k); return;
+    }
+    if(k === 'Enter'){
+      if(state.numberBuffer){
+        clearTimeout(state.numberTimer);
+        commitNumberBuffer();
+      } else {
+        toggleOSD();
+      }
+      return;
+    }
+    if(k === 'Escape' || k === 'Backspace'){
+      if(state.numberBuffer){
+        state.numberBuffer = '';
+        hideNumpad();
+      }
+      return;
+    }
+    if(k === 's' || k === 'S'){
+      openModal('settings');
+    }
+  });
+
+  els.video.addEventListener('click', function(){
+    dismissAutoplayGate();
+    toggleOSD();
+    pokeCornerBtn();
+  });
+
+  /* ---------------- Boot ---------------- */
+
+  function boot(){
+    var persisted = loadPersisted();
+    if(persisted){
+      state.channels = persisted.channels;
+      state.hasChannels = true;
+      els.modalOverlay.hidden = true;
+      var lastNum = parseInt(localStorage.getItem(LS_LAST) || '', 10);
+      var idx = state.channels.findIndex(function(c){ return c.number === lastNum; });
+      startPlayback(idx >= 0 ? idx : 0);
+      pokeCornerBtn();
+    } else {
+      openModal('boot');
+    }
+  }
+
+  boot();
 })();
 </script>
 </body>
