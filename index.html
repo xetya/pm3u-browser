@@ -313,7 +313,7 @@
     <input class="field-input" id="m3uUrl" type="url" placeholder="https://contoh.com/playlist.m3u8" autocomplete="off" spellcheck="false">
     <div class="modal-error" id="modalError"></div>
 
-    <label class="field-label" for="proxyUrl" style="margin-top:16px;">Proxy Server URL (opsional)</label>
+    <label class="field-label" for="proxyUrl" style="margin-top:16px;">https://tuner-header-proxy.nubuuys77.workers.dev/</label>
     <input class="field-input" id="proxyUrl" type="url" placeholder="https://nama-worker-kamu.workers.dev" autocomplete="off" spellcheck="false">
     <div style="font-size:11.5px; color:var(--text-3); margin-top:7px; line-height:1.5;">
       Isi ini hanya kalau ada channel yang butuh header Referer/User-Agent khusus (biasanya ditandai <code style="font-family:var(--font-mono);">#EXTVLCOPT</code> di file M3U). Browser tidak bisa memalsukan header itu sendiri — perlu proxy kecil seperti Cloudflare Worker. Lihat file <code style="font-family:var(--font-mono);">header-proxy-worker.js</code> yang disertakan untuk cara deploy gratisnya.
