@@ -9,6 +9,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.5.13/hls.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/mpegts.js@1.7.3/dist/mpegts.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dashjs@4/dist/dash.all.min.js"></script>
 <style>
   :root{
     --void:#07080a;
@@ -311,6 +312,13 @@
     <label class="field-label" for="m3uUrl">URL Playlist</label>
     <input class="field-input" id="m3uUrl" type="url" placeholder="https://contoh.com/playlist.m3u8" autocomplete="off" spellcheck="false">
     <div class="modal-error" id="modalError"></div>
+
+    <label class="field-label" for="proxyUrl" style="margin-top:16px;">Proxy Server URL (opsional)</label>
+    <input class="field-input" id="proxyUrl" type="url" placeholder="https://nama-worker-kamu.workers.dev" autocomplete="off" spellcheck="false">
+    <div style="font-size:11.5px; color:var(--text-3); margin-top:7px; line-height:1.5;">
+      Isi ini hanya kalau ada channel yang butuh header Referer/User-Agent khusus (biasanya ditandai <code style="font-family:var(--font-mono);">#EXTVLCOPT</code> di file M3U). Browser tidak bisa memalsukan header itu sendiri — perlu proxy kecil seperti Cloudflare Worker. Lihat file <code style="font-family:var(--font-mono);">header-proxy-worker.js</code> yang disertakan untuk cara deploy gratisnya.
+    </div>
+
     <div class="btn-row">
       <button class="btn btn-primary" id="loadBtn">Mulai Menonton</button>
     </div>
@@ -333,6 +341,7 @@
   var LS_URL = 'tuner_playlist_url';
   var LS_CHANNELS = 'tuner_channels';
   var LS_LAST = 'tuner_last_channel_number';
+  var LS_PROXY = 'tuner_header_proxy_url';
 
   var els = {
     video: document.getElementById('video'),
@@ -358,6 +367,7 @@
     resetRow: document.getElementById('resetRow'),
     resetBtn: document.getElementById('resetBtn'),
     m3uUrl: document.getElementById('m3uUrl'),
+    proxyUrl: document.getElementById('proxyUrl'),
     loadBtn: document.getElementById('loadBtn')
   };
 
@@ -368,6 +378,7 @@
     numberTimer: null,
     hls: null,
     mpegts: null,
+    dash: null,
     osdTimer: null,
     cornerTimer: null,
     hasChannels: false
@@ -404,13 +415,39 @@
     var lines = text.split(/\r?\n/);
     var channels = [];
     var current = null;
+    var pendingHeaders = {};
     var attrRegex = /([a-zA-Z0-9_-]+)="([^"]*)"/g;
+
+    function applyVlcOpt(line){
+      var m = line.match(/^#EXTVLCOPT:\s*(http-referrer|http-user-agent|http-origin)\s*=\s*(.*)$/i);
+      if(m){
+        var key = m[1].toLowerCase();
+        var val = m[2].trim();
+        if(key === 'http-referrer') pendingHeaders.referer = val;
+        else if(key === 'http-user-agent') pendingHeaders.userAgent = val;
+        else if(key === 'http-origin') pendingHeaders.origin = val;
+      }
+    }
+    function applyExtHttp(line){
+      var idx = line.indexOf(':');
+      if(idx < 0) return;
+      try{
+        var obj = JSON.parse(line.slice(idx+1).trim());
+        Object.keys(obj).forEach(function(k){
+          var lk = k.toLowerCase();
+          if(lk === 'referer') pendingHeaders.referer = obj[k];
+          else if(lk === 'origin') pendingHeaders.origin = obj[k];
+          else if(lk === 'user-agent') pendingHeaders.userAgent = obj[k];
+        });
+      }catch(e){ /* directive malformed, abaikan */ }
+    }
 
     for(var i=0;i<lines.length;i++){
       var line = lines[i].trim();
       if(!line) continue;
       if(line.charAt(0) === '#'){
-        if(line.toUpperCase().indexOf('#EXTINF') === 0){
+        var upper = line.toUpperCase();
+        if(upper.indexOf('#EXTINF') === 0){
           var attrs = {};
           var m;
           attrRegex.lastIndex = 0;
@@ -431,14 +468,24 @@
             group: attrs['group-title'] || '',
             number: chno
           };
+        } else if(upper.indexOf('#EXTVLCOPT') === 0){
+          applyVlcOpt(line);
+        } else if(upper.indexOf('#EXTHTTP') === 0){
+          applyExtHttp(line);
         }
+        // directive lain (#KODIPROP dll.) diabaikan
         continue;
       }
-      if(current){
-        current.url = line;
-        channels.push(current);
-        current = null;
+      if(!current){
+        current = { name: 'Channel', logo:'', group:'', number:null };
       }
+      current.url = line;
+      if(pendingHeaders.referer) current.referer = pendingHeaders.referer;
+      if(pendingHeaders.userAgent) current.userAgent = pendingHeaders.userAgent;
+      if(pendingHeaders.origin) current.origin = pendingHeaders.origin;
+      channels.push(current);
+      current = null;
+      pendingHeaders = {};
     }
     return assignNumbers(channels);
   }
@@ -539,6 +586,7 @@
       els.resetRow.hidden = false;
       els.m3uUrl.value = (localStorage.getItem(LS_URL) || '');
     }
+    els.proxyUrl.value = (localStorage.getItem(LS_PROXY) || '');
     els.modalError.textContent = '';
     els.modalOverlay.hidden = false;
     setTimeout(function(){ els.m3uUrl.focus(); }, 50);
@@ -562,6 +610,7 @@
 
   els.loadBtn.addEventListener('click', function(){
     var url = els.m3uUrl.value.trim();
+    var proxyUrl = els.proxyUrl.value.trim();
     els.modalError.textContent = '';
     if(!url){
       els.modalError.textContent = 'URL playlist tidak boleh kosong.';
@@ -574,6 +623,10 @@
         throw new Error('Playlist tidak berisi channel yang valid (format M3U tidak dikenali).');
       }
       persistPlaylist(url, channels);
+      try{
+        if(proxyUrl) localStorage.setItem(LS_PROXY, proxyUrl);
+        else localStorage.removeItem(LS_PROXY);
+      }catch(e){}
       state.channels = channels;
       state.hasChannels = true;
       els.modalOverlay.hidden = true;
@@ -585,6 +638,11 @@
     }).finally(function(){
       setLoadBtnBusy(false);
     });
+  });
+
+  els.proxyUrl.addEventListener('keydown', function(e){
+    if(e.key === 'Enter') els.loadBtn.click();
+    e.stopPropagation();
   });
 
   els.m3uUrl.addEventListener('keydown', function(e){
@@ -678,12 +736,30 @@
       try{ state.mpegts.destroy(); }catch(e){}
       state.mpegts = null;
     }
+    if(state.dash){
+      try{ state.dash.reset(); }catch(e){}
+      state.dash = null;
+    }
   }
 
   function getExt(url){
     var clean = url.split('?')[0].split('#')[0];
     var m = clean.match(/\.([a-z0-9]+)$/i);
     return m ? m[1].toLowerCase() : '';
+  }
+
+  function buildPlaybackUrl(ch){
+    var needsHeaders = !!(ch.referer || ch.userAgent || ch.origin);
+    if(!needsHeaders) return ch.url;
+    var proxyBase = '';
+    try{ proxyBase = (localStorage.getItem(LS_PROXY) || '').trim(); }catch(e){}
+    if(!proxyBase) return ch.url; // tidak ada proxy dikonfigurasi, coba langsung apa adanya
+    var base = proxyBase.replace(/\/+$/, '');
+    var qs = 'url=' + encodeURIComponent(ch.url);
+    if(ch.referer) qs += '&referer=' + encodeURIComponent(ch.referer);
+    if(ch.userAgent) qs += '&ua=' + encodeURIComponent(ch.userAgent);
+    if(ch.origin) qs += '&origin=' + encodeURIComponent(ch.origin);
+    return base + '/?' + qs;
   }
 
   function tryNativeVideo(url, onFail){
@@ -764,22 +840,48 @@
     }
   }
 
+  function tryDash(url, onFail){
+    if(!window.dashjs){
+      onFail();
+      return;
+    }
+    var failed = false;
+    function fail(){
+      if(failed) return;
+      failed = true;
+      cleanupHls();
+      onFail();
+    }
+    try{
+      var player = dashjs.MediaPlayer().create();
+      state.dash = player;
+      player.updateSettings({ streaming: { text: { defaultEnabled: false } } });
+      player.on(dashjs.MediaPlayer.events.ERROR, fail);
+      player.initialize(els.video, url, false);
+      attemptPlay(fail);
+    }catch(e){
+      fail();
+    }
+  }
+
   function finalPlaybackError(){
     els.autoplayGate.hidden = true;
     els.playerEmpty.hidden = false;
     toast('Channel ini tidak dapat diputar (server mungkin membatasi akses lintas domain)', {error:true, duration:4200});
   }
 
-  function setupPlayer(url){
+  function setupPlayer(url, extHint){
     cleanupHls();
     els.playerEmpty.hidden = true;
     els.video.removeAttribute('src');
     els.video.load();
     toast('Memuat channel…', {pulse:true, sticky:true});
 
-    var ext = getExt(url);
+    var ext = extHint || getExt(url);
 
-    if(ext === 'flv'){
+    if(ext === 'mpd'){
+      tryDash(url, function(){ tryHls(url, function(){ tryNativeVideo(url, finalPlaybackError); }); });
+    } else if(ext === 'flv'){
       tryMpegts(url, 'flv', function(){ tryNativeVideo(url, finalPlaybackError); });
     } else if(ext === 'ts'){
       tryMpegts(url, 'mpegts', function(){ tryNativeVideo(url, finalPlaybackError); });
@@ -876,7 +978,7 @@
     if(!ch) return;
     state.currentIndex = idx;
     try{ localStorage.setItem(LS_LAST, String(ch.number)); }catch(e){}
-    setupPlayer(ch.url);
+    setupPlayer(buildPlaybackUrl(ch), getExt(ch.url));
     showOSD(ch);
   }
 
