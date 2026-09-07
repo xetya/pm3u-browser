@@ -239,7 +239,7 @@
 <body>
 
 <div id="stage">
-  <video id="video" playsinline></video>
+  <video id="video" playsinline muted></video>
   <div class="player-empty" id="playerEmpty" hidden>
     <div style="font-family:var(--font-display); font-size:15px; color:var(--text-2); letter-spacing:.02em;">TIDAK ADA SINYAL</div>
     <div>Menunggu channel dipilih</div>
@@ -823,22 +823,34 @@
   mutedBadgeEl.addEventListener('click', unmute);
   els.video.addEventListener('click', unmute);
 
-  // Coba putar dengan suara aktif dulu (berhasil di banyak browser TV/webview).
-  // Kalau ditolak browser, baru jatuh ke autoplay bisu + tombol aktifkan suara.
+  // Selalu mulai dalam kondisi bisu (dijamin diizinkan semua browser tanpa
+  // interaksi apa pun), lalu segera coba aktifkan suara secara otomatis.
+  // Ini jauh lebih andal daripada mencoba suara aktif dulu: begitu video
+  // sudah berjalan (meski bisu), kebanyakan browser mengizinkan toggle
+  // suara lewat skrip tanpa perlu klik/tekan tombol.
   function attemptPlay(){
-    els.video.muted = false;
+    els.video.muted = true;
     var p = els.video.play();
+    function afterStart(){
+      hideToast();
+      try{
+        els.video.muted = false;
+      }catch(e){}
+      setTimeout(function(){
+        if(els.video.muted){
+          els.video.muted = false; // percobaan kedua, sebagian browser butuh sedikit jeda
+          setTimeout(function(){
+            if(els.video.muted) showMutedBadge(); else hideMutedBadge();
+          }, 200);
+        } else {
+          hideMutedBadge();
+        }
+      }, 150);
+    }
     if(p && typeof p.then === 'function'){
-      p.then(function(){
-        hideToast();
-        hideMutedBadge();
-      }).catch(function(){
-        els.video.muted = true;
-        els.video.play().then(function(){
-          hideToast();
-          showMutedBadge();
-        }).catch(handleAutoplayBlock);
-      });
+      p.then(afterStart).catch(handleAutoplayBlock);
+    } else {
+      afterStart();
     }
   }
 
