@@ -689,15 +689,19 @@
   function tryNativeVideo(url, onFail){
     els.video.src = url;
     var settled = false;
-    var onReady = function(){
-      if(settled) return; settled = true;
-      cleanup();
-      attemptPlay();
-    };
-    var onErr = function(){
-      if(settled) return; settled = true;
+    function settleFail(){
+      if(settled) return;
+      settled = true;
       cleanup();
       onFail();
+    }
+    var onReady = function(){
+      if(settled) return;
+      cleanup();
+      attemptPlay(settleFail);
+    };
+    var onErr = function(){
+      settleFail();
     };
     function cleanup(){
       els.video.removeEventListener('loadedmetadata', onReady);
@@ -720,15 +724,17 @@
     var hls = new Hls({ maxBufferLength: 30, liveDurationInfinity:true });
     state.hls = hls;
     var failed = false;
+    function fail(){
+      if(failed) return;
+      failed = true;
+      cleanupHls();
+      onFail();
+    }
     hls.on(Hls.Events.MANIFEST_PARSED, function(){
-      attemptPlay();
+      attemptPlay(fail);
     });
     hls.on(Hls.Events.ERROR, function(evt, data){
-      if(data && data.fatal && !failed){
-        failed = true;
-        cleanupHls();
-        onFail();
-      }
+      if(data && data.fatal) fail();
     });
     hls.loadSource(url);
     hls.attachMedia(els.video);
@@ -740,25 +746,26 @@
       return;
     }
     var failed = false;
+    function fail(){
+      if(failed) return;
+      failed = true;
+      cleanupHls();
+      onFail();
+    }
     try{
       var player = mpegts.createPlayer({ type: kind, isLive: true, url: url });
       state.mpegts = player;
       player.attachMediaElement(els.video);
-      player.on(mpegts.Events.ERROR, function(){
-        if(!failed){
-          failed = true;
-          cleanupHls();
-          onFail();
-        }
-      });
+      player.on(mpegts.Events.ERROR, fail);
       player.load();
-      attemptPlay();
+      attemptPlay(fail);
     }catch(e){
-      if(!failed){ failed = true; cleanupHls(); onFail(); }
+      fail();
     }
   }
 
   function finalPlaybackError(){
+    els.autoplayGate.hidden = true;
     els.playerEmpty.hidden = false;
     toast('Channel ini tidak dapat diputar (server mungkin membatasi akses lintas domain)', {error:true, duration:4200});
   }
@@ -825,10 +832,10 @@
 
   // Selalu mulai dalam kondisi bisu (dijamin diizinkan semua browser tanpa
   // interaksi apa pun), lalu segera coba aktifkan suara secara otomatis.
-  // Ini jauh lebih andal daripada mencoba suara aktif dulu: begitu video
-  // sudah berjalan (meski bisu), kebanyakan browser mengizinkan toggle
-  // suara lewat skrip tanpa perlu klik/tekan tombol.
-  function attemptPlay(){
+  // onFail hanya dipanggil untuk kegagalan pemutaran SUNGGUHAN (stream rusak/
+  // tidak ada sinyal) — bukan untuk kebijakan autoplay, sehingga tombol
+  // "tekan untuk mulai" tidak lagi salah muncul saat channel gagal/tanpa sinyal.
+  function attemptPlay(onFail){
     els.video.muted = true;
     var p = els.video.play();
     function afterStart(){
@@ -847,8 +854,18 @@
         }
       }, 150);
     }
+    function onPlayError(err){
+      var blockedByPolicy = err && err.name === 'NotAllowedError';
+      if(blockedByPolicy){
+        handleAutoplayBlock();
+      } else if(typeof onFail === 'function'){
+        onFail();
+      } else {
+        finalPlaybackError();
+      }
+    }
     if(p && typeof p.then === 'function'){
-      p.then(afterStart).catch(handleAutoplayBlock);
+      p.then(afterStart).catch(onPlayError);
     } else {
       afterStart();
     }
