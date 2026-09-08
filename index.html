@@ -784,10 +784,6 @@
 
   function cleanupHls(){
     if(state.hls){
-      try{
-        if(state.hls._abrCheckTimer) clearInterval(state.hls._abrCheckTimer);
-        if(state.hls._abrOnWaiting) els.video.removeEventListener('waiting', state.hls._abrOnWaiting);
-      }catch(e){}
       try{ state.hls.destroy(); }catch(e){}
       state.hls = null;
     }
@@ -895,9 +891,14 @@
       // tidak ada gunanya memaksa 1080p kalau yang ditampilkan cuma
       // sekian ratus piksel di layar.
       capLevelToPlayerSize: true,
-      // ABR bawaan hls.js dimatikan total di sini — kualitasnya dikontrol
-      // manual sendiri di bawah (lihat blok "Kontrol kualitas manual").
-      startLevel: 0
+      // ABR (auto-quality) dibuat lebih "santai": naik ke resolusi lebih
+      // tinggi hanya kalau bandwidth benar-benar longgar & stabil, dan
+      // bereaksi lebih halus (tidak gampang kepancing lonjakan sesaat)
+      // supaya tidak bolak-balik ganti kualitas tiap ada sedikit fluktuasi.
+      abrBandWidthFactor: 0.8,
+      abrBandWidthUpFactor: 0.6,
+      abrEwmaFastLive: 5.0,
+      abrEwmaSlowLive: 15.0
     });
     if(isStale(token)){ try{ hls.destroy(); }catch(e){} return; }
     state.hls = hls;
@@ -908,56 +909,8 @@
       cleanupHls();
       if(!isStale(token)) onFail();
     }
-
-    // ---------------- Kontrol kualitas manual (custom, bukan bawaan hls.js) ----------------
-    // Aturannya sengaja sederhana & konservatif:
-    //  - Mulai dari kualitas PALING RENDAH dulu (aman).
-    //  - Naik cuma SATU tingkat setiap kali, dan hanya kalau sudah stabil
-    //    (tidak ada tanda buffering) selama ±2 menit penuh di kualitas
-    //    sekarang — tidak pernah melompati tingkat di antaranya.
-    //  - Begitu ada tanda buffering (event "waiting" dari elemen video),
-    //    LANGSUNG turun satu tingkat saat itu juga (tidak menunggu jadwal
-    //    pengecekan berkala) supaya playback cepat terselamatkan, lalu ada
-    //    masa jeda sebelum boleh mempertimbangkan naik lagi.
-    //  - Pengecekan berkala sengaja dibuat JARANG (tiap 20 detik) dan
-    //    ringan (cuma bandingkan angka waktu), supaya tidak membebani web.
-    var STABLE_MS = 2 * 60 * 1000;
-    var COOLDOWN_MS = 2 * 60 * 1000;
-    var CHECK_INTERVAL_MS = 20 * 1000;
-    var abrStableSince = 0;
-    var abrCooldownUntil = 0;
-
-    hls.on(Hls.Events.MANIFEST_PARSED, function(evt, data){
-      if(isStale(token)) return;
-      attemptPlay(token, fail);
-
-      var levelCount = (data && data.levels) ? data.levels.length : 1;
-      if(levelCount > 1){
-        hls.currentLevel = 0; // mulai dari yang paling rendah
-        abrStableSince = Date.now();
-        abrCooldownUntil = 0;
-
-        hls._abrOnWaiting = function(){
-          if(isStale(token)) return;
-          if(hls.currentLevel > 0){
-            hls.currentLevel = hls.currentLevel - 1;
-          }
-          abrStableSince = Date.now();
-          abrCooldownUntil = Date.now() + COOLDOWN_MS;
-        };
-        els.video.addEventListener('waiting', hls._abrOnWaiting);
-
-        hls._abrCheckTimer = setInterval(function(){
-          if(isStale(token)) return;
-          var now = Date.now();
-          if(now < abrCooldownUntil) return;
-          if(now - abrStableSince < STABLE_MS) return;
-          if(hls.currentLevel >= 0 && hls.currentLevel < hls.levels.length - 1){
-            hls.currentLevel = hls.currentLevel + 1;
-          }
-          abrStableSince = now;
-        }, CHECK_INTERVAL_MS);
-      }
+    hls.on(Hls.Events.MANIFEST_PARSED, function(){
+      if(!isStale(token)) attemptPlay(token, fail);
     });
     hls.on(Hls.Events.ERROR, function(evt, data){
       if(data && data.fatal) fail();
