@@ -470,6 +470,7 @@
     var channels = [];
     var current = null;
     var pendingHeaders = {};
+    var pendingDrm = {};
     var attrRegex = /([a-zA-Z0-9_-]+)="([^"]*)"/g;
 
     function applyVlcOpt(line){
@@ -503,6 +504,42 @@
         });
       }catch(e){ /* directive malformed, abaikan */ }
     }
+    // #KODIPROP dipakai add-on Kodi "inputstream.adaptive" — banyak dipakai
+    // ulang di playlist M3U untuk channel DASH terenkripsi (Widevine DRM).
+    // stream_headers formatnya "key=value&key2=value2" (BUKAN JSON), dan
+    // bisa muncul di lebih dari satu baris (mis. origin+referer di satu
+    // baris, user-agent di baris lain) — semuanya digabung, bukan saling
+    // menimpa. KODIPROP dianggap lebih otoritatif dari EXTVLCOPT kalau
+    // keduanya ada untuk channel yang sama, karena biasanya KODIPROP itu
+    // metadata resmi yang menyertai info DRM-nya.
+    function applyKodiProp(line){
+      var idx = line.indexOf(':');
+      if(idx < 0) return;
+      var rest = line.slice(idx+1).trim(); // mis. "inputstream.adaptive.license_key=https://..."
+      var eq = rest.indexOf('=');
+      if(eq < 0) return;
+      var key = rest.slice(0, eq).trim().toLowerCase();
+      var val = rest.slice(eq+1).trim();
+      if(key === 'inputstream.adaptive.stream_headers'){
+        val.split('&').forEach(function(pair){
+          var e2 = pair.indexOf('=');
+          if(e2 < 0) return;
+          var k2 = pair.slice(0, e2).trim().toLowerCase();
+          var v2 = pair.slice(e2+1).trim();
+          if(!v2) return;
+          if(k2 === 'referer' || k2 === 'referrer') pendingHeaders.referer = v2;
+          else if(k2 === 'origin') pendingHeaders.origin = v2;
+          else if(k2 === 'user-agent' || k2 === 'useragent') pendingHeaders.userAgent = v2;
+        });
+      } else if(key === 'inputstream.adaptive.license_type'){
+        pendingDrm.type = val;
+      } else if(key === 'inputstream.adaptive.license_key'){
+        // Beberapa generator menyisipkan konfigurasi request tambahan
+        // setelah "|" (format ala inputstream.adaptive: url|headers|POST-data|response).
+        // Kita cuma butuh bagian URL-nya (sebelum "|" pertama, kalau ada).
+        pendingDrm.licenseUrl = val.split('|')[0].trim();
+      }
+    }
 
     for(var i=0;i<lines.length;i++){
       var line = lines[i].trim();
@@ -534,8 +571,9 @@
           applyVlcOpt(line);
         } else if(upper.indexOf('#EXTHTTP') === 0){
           applyExtHttp(line);
+        } else if(upper.indexOf('#KODIPROP') === 0){
+          applyKodiProp(line);
         }
-        // directive lain (#KODIPROP dll.) diabaikan
         continue;
       }
       if(!current){
@@ -545,9 +583,12 @@
       if(pendingHeaders.referer) current.referer = pendingHeaders.referer;
       if(pendingHeaders.userAgent) current.userAgent = pendingHeaders.userAgent;
       if(pendingHeaders.origin) current.origin = pendingHeaders.origin;
+      if(pendingDrm.type) current.drmType = pendingDrm.type;
+      if(pendingDrm.licenseUrl) current.drmLicenseUrl = pendingDrm.licenseUrl;
       channels.push(current);
       current = null;
       pendingHeaders = {};
+      pendingDrm = {};
     }
     return assignNumbers(channels);
   }
@@ -886,12 +927,16 @@
     warmupTimer = setInterval(warmupProxy, 4 * 60 * 1000);
   }
 
-  function buildProxiedUrl(ch, proxyBase){
-    var qs = 'url=' + encodeURIComponent(ch.url);
+  function buildProxiedUrlFor(targetUrl, ch, proxyBase){
+    var qs = 'url=' + encodeURIComponent(targetUrl);
     if(ch.referer) qs += '&referer=' + encodeURIComponent(ch.referer);
     if(ch.userAgent) qs += '&ua=' + encodeURIComponent(ch.userAgent);
     if(ch.origin) qs += '&origin=' + encodeURIComponent(ch.origin);
     return proxyBase + '/?' + qs;
+  }
+
+  function buildProxiedUrl(ch, proxyBase){
+    return buildProxiedUrlFor(ch.url, ch, proxyBase);
   }
 
   function isStale(token){
@@ -1021,7 +1066,7 @@
     }
   }
 
-  function tryDash(url, token, onFail){
+  function tryDash(url, token, ch, onFail){
     if(isStale(token)) return;
     if(!window.dashjs){
       onFail();
@@ -1039,6 +1084,25 @@
       if(isStale(token)){ try{ player.reset(); }catch(e){} return; }
       state.dash = player;
       player.updateSettings({ streaming: { text: { defaultEnabled: false } } });
+
+      // Channel DASH terenkripsi (mis. Widevine) menyertakan URL license
+      // server sendiri di playlist (#KODIPROP:...license_key=...). Browser
+      // butuh CDM bawaan (Chrome/Edge/Android punya Widevine; Safari
+      // TIDAK punya Widevine sama sekali — cuma FairPlay) untuk benar-benar
+      // mendekripsi videonya; kita cuma menjembatani permintaan lisensinya.
+      // Permintaan lisensi itu sendiri juga butuh header Referer/UA palsu
+      // yang browser tidak bisa kirim langsung, jadi kalau proxy sudah
+      // dikonfigurasi, permintaan lisensi ikut dialihkan lewat proxy itu
+      // juga (proxy harus meneruskan method POST + body biner, bukan cuma
+      // GET seperti manifest/video).
+      if(ch && ch.drmLicenseUrl){
+        var proxyBase = getProxyBase();
+        var licenseUrl = proxyBase ? buildProxiedUrlFor(ch.drmLicenseUrl, ch, proxyBase) : ch.drmLicenseUrl;
+        var protData = {};
+        protData[ch.drmType || 'com.widevine.alpha'] = { serverURL: licenseUrl };
+        player.setProtectionData(protData);
+      }
+
       player.on(dashjs.MediaPlayer.events.ERROR, fail);
       player.on(dashjs.MediaPlayer.events.STREAM_INITIALIZED, function(){
         applyForcedQualityDash(player);
@@ -1106,7 +1170,7 @@
     }
   });
 
-  function setupPlayer(url, extHint, token, onAllFail){
+  function setupPlayer(url, extHint, token, ch, onAllFail){
     cleanupHls();
     els.playerEmpty.hidden = true;
     els.video.removeAttribute('src');
@@ -1117,7 +1181,7 @@
     var giveUp = onAllFail || finalPlaybackError;
 
     if(ext === 'mpd'){
-      tryDash(url, token, function(){ tryHls(url, token, function(){ tryNativeVideo(url, token, giveUp); }); });
+      tryDash(url, token, ch, function(){ tryHls(url, token, function(){ tryNativeVideo(url, token, giveUp); }); });
     } else if(ext === 'flv'){
       tryMpegts(url, 'flv', token, function(){ tryNativeVideo(url, token, giveUp); });
     } else if(ext === 'ts'){
@@ -1242,7 +1306,7 @@
     // lainnya) adalah selalu menitipkan permintaan lewat proxy begitu tersedia.
     var playUrl = proxyBase ? buildProxiedUrl(ch, proxyBase) : ch.url;
 
-    setupPlayer(playUrl, ext, token, function(){
+    setupPlayer(playUrl, ext, token, ch, function(){
       if(isStale(token)) return;
       finalPlaybackError();
       scheduleAutoRetry(idx, token);
