@@ -403,7 +403,9 @@
     playToken: 0,
     osdTimer: null,
     cornerTimer: null,
-    hasChannels: false
+    hasChannels: false,
+    retryTimer: null,
+    retryDelay: 0
   };
 
   /* ---------------- Utilities ---------------- */
@@ -975,6 +977,32 @@
     toast('Channel ini tidak dapat diputar (server mungkin membatasi akses lintas domain)', {error:true, duration:4200});
   }
 
+  // Coba ulang otomatis kalau koneksi/stream sempat putus lalu pulih —
+  // tanpa ini, channel akan diam macet di layar "tidak ada sinyal"
+  // selamanya walau internetnya sudah kembali normal. Jaraknya makin
+  // lama makin panjang (5s, 10s, 20s, maks 30s) supaya tidak membanjiri
+  // server dengan percobaan kalau memang sedang benar-benar mati total.
+  function scheduleAutoRetry(idx, token){
+    if(state.retryTimer) clearTimeout(state.retryTimer);
+    state.retryDelay = state.retryDelay ? Math.min(state.retryDelay * 2, 30000) : 5000;
+    state.retryTimer = setTimeout(function(){
+      state.retryTimer = null;
+      if(isStale(token)) return; // sudah pindah channel lain, batalkan
+      startPlayback(idx, true);
+    }, state.retryDelay);
+  }
+
+  // Begitu browser mendeteksi koneksi internet kembali normal, langsung
+  // coba lagi tanpa menunggu jadwal backoff di atas.
+  window.addEventListener('online', function(){
+    if(!state.hasChannels) return;
+    if(!els.playerEmpty.hidden){
+      if(state.retryTimer){ clearTimeout(state.retryTimer); state.retryTimer = null; }
+      state.retryDelay = 0;
+      startPlayback(state.currentIndex);
+    }
+  });
+
   function setupPlayer(url, extHint, token, onAllFail){
     cleanupHls();
     els.playerEmpty.hidden = true;
@@ -1049,6 +1077,9 @@
     var p = els.video.play();
     function afterStart(){
       if(isStale(token)) return;
+      // Berhasil main lagi — reset hitungan percobaan ulang otomatis.
+      if(state.retryTimer){ clearTimeout(state.retryTimer); state.retryTimer = null; }
+      state.retryDelay = 0;
       hideToast();
       try{
         els.video.muted = false;
@@ -1084,9 +1115,16 @@
     }
   }
 
-  function startPlayback(idx){
+  function startPlayback(idx, isAutoRetry){
     var ch = state.channels[idx];
     if(!ch) return;
+    if(!isAutoRetry){
+      // Ganti channel yang disengaja (bukan percobaan ulang otomatis
+      // channel yang sama) — batalkan jadwal retry lama & mulai hitungan
+      // backoff dari awal lagi untuk channel baru ini.
+      if(state.retryTimer){ clearTimeout(state.retryTimer); state.retryTimer = null; }
+      state.retryDelay = 0;
+    }
     state.currentIndex = idx;
     try{ localStorage.setItem(LS_LAST, String(ch.number)); }catch(e){}
     showOSD(ch);
@@ -1104,6 +1142,7 @@
     setupPlayer(playUrl, ext, token, function(){
       if(isStale(token)) return;
       finalPlaybackError();
+      scheduleAutoRetry(idx, token);
     });
   }
 
