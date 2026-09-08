@@ -313,10 +313,10 @@
     <input class="field-input" id="m3uUrl" type="url" placeholder="https://contoh.com/playlist.m3u8" autocomplete="off" spellcheck="false">
     <div class="modal-error" id="modalError"></div>
 
-    <label class="field-label" for="proxyUrl" style="margin-top:16px;">https://tuner-header-proxy.nubuuys77.workers.dev/</label>
+    <label class="field-label" for="proxyUrl" style="margin-top:16px;">Proxy Server URL (opsional)</label>
     <input class="field-input" id="proxyUrl" type="url" placeholder="https://nama-worker-kamu.workers.dev" autocomplete="off" spellcheck="false">
     <div style="font-size:11.5px; color:var(--text-3); margin-top:7px; line-height:1.5;">
-      Isi ini hanya kalau ada channel yang butuh header Referer/User-Agent khusus (biasanya ditandai <code style="font-family:var(--font-mono);">#EXTVLCOPT</code> di file M3U). Browser tidak bisa memalsukan header itu sendiri — perlu proxy kecil seperti Cloudflare Worker. Lihat file <code style="font-family:var(--font-mono);">header-proxy-worker.js</code> yang disertakan untuk cara deploy gratisnya.
+      Kalau diisi, <b>semua channel akan lewat proxy ini</b> (lebih andal — persis seperti aplikasi IPTV lain yang berhasil memutar channel berheader khusus, ditandai <code style="font-family:var(--font-mono);">#EXTVLCOPT</code> di M3U, maupun channel yang diblokir CORS). Kosongkan kalau tidak butuh. Lihat file <code style="font-family:var(--font-mono);">header-proxy-worker.js</code> yang disertakan untuk cara deploy gratisnya di Cloudflare Workers.
     </div>
 
     <div class="btn-row">
@@ -379,6 +379,7 @@
     hls: null,
     mpegts: null,
     dash: null,
+    playToken: 0,
     osdTimer: null,
     cornerTimer: null,
     hasChannels: false
@@ -748,66 +749,74 @@
     return m ? m[1].toLowerCase() : '';
   }
 
-  function buildPlaybackUrl(ch){
-    var needsHeaders = !!(ch.referer || ch.userAgent || ch.origin);
-    if(!needsHeaders) return ch.url;
-    var proxyBase = '';
-    try{ proxyBase = (localStorage.getItem(LS_PROXY) || '').trim(); }catch(e){}
-    if(!proxyBase) return ch.url; // tidak ada proxy dikonfigurasi, coba langsung apa adanya
-    var base = proxyBase.replace(/\/+$/, '');
+  function getProxyBase(){
+    var v = '';
+    try{ v = (localStorage.getItem(LS_PROXY) || '').trim(); }catch(e){}
+    return v.replace(/\/+$/, '');
+  }
+
+  function buildProxiedUrl(ch, proxyBase){
     var qs = 'url=' + encodeURIComponent(ch.url);
     if(ch.referer) qs += '&referer=' + encodeURIComponent(ch.referer);
     if(ch.userAgent) qs += '&ua=' + encodeURIComponent(ch.userAgent);
     if(ch.origin) qs += '&origin=' + encodeURIComponent(ch.origin);
-    return base + '/?' + qs;
+    return proxyBase + '/?' + qs;
   }
 
-  function tryNativeVideo(url, onFail){
+  function isStale(token){
+    return token !== state.playToken;
+  }
+
+  function tryNativeVideo(url, token, onFail){
+    if(isStale(token)) return;
     els.video.src = url;
     var settled = false;
-    function settleFail(){
-      if(settled) return;
-      settled = true;
-      cleanup();
-      onFail();
-    }
-    var onReady = function(){
-      if(settled) return;
-      cleanup();
-      attemptPlay(settleFail);
-    };
-    var onErr = function(){
-      settleFail();
-    };
     function cleanup(){
       els.video.removeEventListener('loadedmetadata', onReady);
       els.video.removeEventListener('error', onErr);
     }
+    function settleFail(){
+      if(settled) return;
+      settled = true;
+      cleanup();
+      if(!isStale(token)) onFail();
+    }
+    var onReady = function(){
+      if(settled) return;
+      settled = true;
+      cleanup();
+      if(!isStale(token)) attemptPlay(token, onFail);
+    };
+    var onErr = function(){
+      settleFail();
+    };
     els.video.addEventListener('loadedmetadata', onReady);
     els.video.addEventListener('error', onErr, {once:true});
   }
 
-  function tryHls(url, onFail){
+  function tryHls(url, token, onFail){
+    if(isStale(token)) return;
     if(!(window.Hls && Hls.isSupported())){
       // Safari & beberapa browser TV punya dukungan HLS native lewat <video> langsung.
       if(els.video.canPlayType('application/vnd.apple.mpegurl')){
-        tryNativeVideo(url, onFail);
+        tryNativeVideo(url, token, onFail);
       } else {
         onFail();
       }
       return;
     }
     var hls = new Hls({ maxBufferLength: 30, liveDurationInfinity:true });
+    if(isStale(token)){ try{ hls.destroy(); }catch(e){} return; }
     state.hls = hls;
     var failed = false;
     function fail(){
       if(failed) return;
       failed = true;
       cleanupHls();
-      onFail();
+      if(!isStale(token)) onFail();
     }
     hls.on(Hls.Events.MANIFEST_PARSED, function(){
-      attemptPlay(fail);
+      if(!isStale(token)) attemptPlay(token, fail);
     });
     hls.on(Hls.Events.ERROR, function(evt, data){
       if(data && data.fatal) fail();
@@ -816,7 +825,8 @@
     hls.attachMedia(els.video);
   }
 
-  function tryMpegts(url, kind, onFail){
+  function tryMpegts(url, kind, token, onFail){
+    if(isStale(token)) return;
     if(!(window.mpegts && mpegts.isSupported())){
       onFail();
       return;
@@ -826,21 +836,23 @@
       if(failed) return;
       failed = true;
       cleanupHls();
-      onFail();
+      if(!isStale(token)) onFail();
     }
     try{
       var player = mpegts.createPlayer({ type: kind, isLive: true, url: url });
+      if(isStale(token)){ try{ player.destroy(); }catch(e){} return; }
       state.mpegts = player;
       player.attachMediaElement(els.video);
       player.on(mpegts.Events.ERROR, fail);
       player.load();
-      attemptPlay(fail);
+      attemptPlay(token, fail);
     }catch(e){
       fail();
     }
   }
 
-  function tryDash(url, onFail){
+  function tryDash(url, token, onFail){
+    if(isStale(token)) return;
     if(!window.dashjs){
       onFail();
       return;
@@ -850,15 +862,16 @@
       if(failed) return;
       failed = true;
       cleanupHls();
-      onFail();
+      if(!isStale(token)) onFail();
     }
     try{
       var player = dashjs.MediaPlayer().create();
+      if(isStale(token)){ try{ player.reset(); }catch(e){} return; }
       state.dash = player;
       player.updateSettings({ streaming: { text: { defaultEnabled: false } } });
       player.on(dashjs.MediaPlayer.events.ERROR, fail);
       player.initialize(els.video, url, false);
-      attemptPlay(fail);
+      attemptPlay(token, fail);
     }catch(e){
       fail();
     }
@@ -870,7 +883,7 @@
     toast('Channel ini tidak dapat diputar (server mungkin membatasi akses lintas domain)', {error:true, duration:4200});
   }
 
-  function setupPlayer(url, extHint){
+  function setupPlayer(url, extHint, token, onAllFail){
     cleanupHls();
     els.playerEmpty.hidden = true;
     els.video.removeAttribute('src');
@@ -878,19 +891,20 @@
     toast('Memuat channel…', {pulse:true, sticky:true});
 
     var ext = extHint || getExt(url);
+    var giveUp = onAllFail || finalPlaybackError;
 
     if(ext === 'mpd'){
-      tryDash(url, function(){ tryHls(url, function(){ tryNativeVideo(url, finalPlaybackError); }); });
+      tryDash(url, token, function(){ tryHls(url, token, function(){ tryNativeVideo(url, token, giveUp); }); });
     } else if(ext === 'flv'){
-      tryMpegts(url, 'flv', function(){ tryNativeVideo(url, finalPlaybackError); });
+      tryMpegts(url, 'flv', token, function(){ tryNativeVideo(url, token, giveUp); });
     } else if(ext === 'ts'){
-      tryMpegts(url, 'mpegts', function(){ tryNativeVideo(url, finalPlaybackError); });
+      tryMpegts(url, 'mpegts', token, function(){ tryNativeVideo(url, token, giveUp); });
     } else if(ext === 'mp4' || ext === 'webm' || ext === 'ogg'){
-      tryNativeVideo(url, function(){ tryHls(url, finalPlaybackError); });
+      tryNativeVideo(url, token, function(){ tryHls(url, token, giveUp); });
     } else {
       // m3u8 atau ekstensi tidak dikenal: HLS dulu, lalu MPEG-TS, lalu native mentah.
-      tryHls(url, function(){
-        tryMpegts(url, 'mpegts', function(){ tryNativeVideo(url, finalPlaybackError); });
+      tryHls(url, token, function(){
+        tryMpegts(url, 'mpegts', token, function(){ tryNativeVideo(url, token, giveUp); });
       });
     }
   }
@@ -902,7 +916,7 @@
   function dismissAutoplayGate(){
     if(!els.autoplayGate.hidden){
       els.autoplayGate.hidden = true;
-      attemptPlay();
+      attemptPlay(state.playToken);
     }
   }
   els.autoplayGate.addEventListener('click', dismissAutoplayGate);
@@ -937,18 +951,22 @@
   // onFail hanya dipanggil untuk kegagalan pemutaran SUNGGUHAN (stream rusak/
   // tidak ada sinyal) — bukan untuk kebijakan autoplay, sehingga tombol
   // "tekan untuk mulai" tidak lagi salah muncul saat channel gagal/tanpa sinyal.
-  function attemptPlay(onFail){
+  function attemptPlay(token, onFail){
+    if(isStale(token)) return;
     els.video.muted = true;
     var p = els.video.play();
     function afterStart(){
+      if(isStale(token)) return;
       hideToast();
       try{
         els.video.muted = false;
       }catch(e){}
       setTimeout(function(){
+        if(isStale(token)) return;
         if(els.video.muted){
           els.video.muted = false; // percobaan kedua, sebagian browser butuh sedikit jeda
           setTimeout(function(){
+            if(isStale(token)) return;
             if(els.video.muted) showMutedBadge(); else hideMutedBadge();
           }, 200);
         } else {
@@ -957,6 +975,7 @@
       }, 150);
     }
     function onPlayError(err){
+      if(isStale(token)) return;
       var blockedByPolicy = err && err.name === 'NotAllowedError';
       if(blockedByPolicy){
         handleAutoplayBlock();
@@ -978,8 +997,22 @@
     if(!ch) return;
     state.currentIndex = idx;
     try{ localStorage.setItem(LS_LAST, String(ch.number)); }catch(e){}
-    setupPlayer(buildPlaybackUrl(ch), getExt(ch.url));
     showOSD(ch);
+
+    var token = ++state.playToken;
+    var ext = getExt(ch.url);
+    var proxyBase = getProxyBase();
+    // Kalau proxy sudah dikonfigurasi, SEMUA channel lewat proxy itu — bukan
+    // hanya yang menyatakan butuh header khusus. Banyak server IPTV memblokir
+    // akses browser (CORS) meski tidak menuntut Referer/User-Agent tertentu,
+    // jadi cara paling andal (persis seperti aplikasi IPTV berbasis proxy
+    // lainnya) adalah selalu menitipkan permintaan lewat proxy begitu tersedia.
+    var playUrl = proxyBase ? buildProxiedUrl(ch, proxyBase) : ch.url;
+
+    setupPlayer(playUrl, ext, token, function(){
+      if(isStale(token)) return;
+      finalPlaybackError();
+    });
   }
 
   function nextChannel(){
