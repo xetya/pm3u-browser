@@ -420,11 +420,19 @@
     var attrRegex = /([a-zA-Z0-9_-]+)="([^"]*)"/g;
 
     function applyVlcOpt(line){
-      var m = line.match(/^#EXTVLCOPT:\s*(http-referrer|http-user-agent|http-origin)\s*=\s*(.*)$/i);
+      // Terima ejaan "http-referer" (1 huruf r, ejaan resmi header HTTP)
+      // maupun "http-referrer" (2 huruf r, ejaan resmi opsi VLC) — banyak
+      // tool generator M3U memakai salah satunya secara tidak konsisten.
+      var m = line.match(/^#EXTVLCOPT:\s*(http-referrer|http-referer|http-user-agent|http-origin)\s*=\s*(.*)$/i);
       if(m){
         var key = m[1].toLowerCase();
         var val = m[2].trim();
-        if(key === 'http-referrer') pendingHeaders.referer = val;
+        // Sebagian playlist hasil scrape/copy dari halaman web menyisakan
+        // artefak HTML-entity (mis. "&amp;" nyangkut di akhir nilai) yang
+        // seharusnya tidak ada di sini. Bersihkan supaya header yang
+        // dikirim ke server benar-benar valid.
+        val = val.replace(/&amp;/gi, '&').replace(/&+\s*$/,'').trim();
+        if(key === 'http-referrer' || key === 'http-referer') pendingHeaders.referer = val;
         else if(key === 'http-user-agent') pendingHeaders.userAgent = val;
         else if(key === 'http-origin') pendingHeaders.origin = val;
       }
