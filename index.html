@@ -334,7 +334,7 @@
         <label class="field-label" for="proxyUrl">Proxy Server URL (opsional)</label>
         <input class="field-input" id="proxyUrl" type="url" placeholder="https://nama-worker-kamu.workers.dev" autocomplete="off" spellcheck="false">
         <div style="font-size:11.5px; color:var(--text-3); margin-top:7px; line-height:1.5;">
-          Kalau diisi, <b>semua channel akan lewat proxy ini</b> (lebih andal — persis seperti aplikasi IPTV lain yang berhasil memutar channel berheader khusus, ditandai <code style="font-family:var(--font-mono);">#EXTVLCOPT</code> di M3U, maupun channel yang diblokir CORS). Kosongkan kalau tidak butuh. Lihat file <code style="font-family:var(--font-mono);">header-proxy-worker.js</code> yang disertakan untuk cara deploy gratisnya di Cloudflare Workers.
+          Kalau diisi, <b>semua channel akan lewat proxy ini</b> (lebih andal — persis seperti aplikasi IPTV lain yang berhasil memutar channel berheader khusus, ditandai <code style="font-family:var(--font-mono);">#EXTVLCOPT</code> di M3U, maupun channel yang diblokir CORS). Kosongkan kalau tidak butuh. Kolom ini bisa juga sudah terisi otomatis kalau developer menaruh URL default langsung di kode (<code style="font-family:var(--font-mono);">DEFAULT_PROXY_URL</code>) — mengisinya manual di sini akan menimpanya sampai kode itu diubah lagi. <b>Rekomendasi: pakai file <code style="font-family:var(--font-mono);">header-proxy-worker-deno.js</code></b> (deploy ke Deno Deploy) — untuk channel IPTV Indonesia, ini terbukti lebih jarang diblokir dibanding Cloudflare Workers.
         </div>
       </div>
     </div>
@@ -362,6 +362,23 @@
   var LS_CHANNELS = 'tuner_channels';
   var LS_LAST = 'tuner_last_channel_number';
   var LS_PROXY = 'tuner_header_proxy_url';
+  var LS_PROXY_SNAPSHOT = 'tuner_header_proxy_default_snapshot';
+
+  // ============================================================
+  // DEFAULT PROXY URL (opsional, edit langsung di sini)
+  // ============================================================
+  // Isi dengan URL proxy kamu (Deno Deploy / Cloudflare Worker / dll) kalau
+  // mau semua orang yang buka website ini otomatis pakai proxy itu tanpa
+  // perlu isi manual di kolom pengaturan. Kosongkan ('') kalau tidak mau
+  // ada default sama sekali — kolom di web akan kosong sampai diisi manual.
+  //
+  // ATURAN PRIORITAS: kalau kolom di web SUDAH pernah diisi manual, nilai
+  // itu tetap dipakai (tidak tertimpa) SELAMA baris di bawah ini tidak
+  // diubah. Begitu kamu ganti URL di baris ini dan deploy ulang, semua
+  // pengunjung (termasuk yang sudah pernah isi manual sebelumnya) akan
+  // otomatis pindah memakai URL baru ini — sampai mereka isi manual lagi
+  // lewat kolom pengaturan, yang lalu berlaku sampai baris ini diubah lagi.
+  var DEFAULT_PROXY_URL = '';
 
   var els = {
     video: document.getElementById('video'),
@@ -597,7 +614,25 @@
       localStorage.removeItem(LS_URL);
       localStorage.removeItem(LS_CHANNELS);
       localStorage.removeItem(LS_LAST);
+      localStorage.removeItem(LS_PROXY);
+      localStorage.removeItem(LS_PROXY_SNAPSHOT);
     }catch(e){}
+  }
+
+  // Menyamakan proxy aktif dengan DEFAULT_PROXY_URL di kode, TAPI cuma kalau
+  // baris DEFAULT_PROXY_URL itu baru saja diubah developer sejak kunjungan
+  // terakhir (dideteksi lewat "snapshot" nilainya). Kalau kode tidak
+  // berubah, pengaturan manual dari kolom web (kalau ada) tidak diganggu.
+  function syncProxyDefault(){
+    if(!DEFAULT_PROXY_URL) return; // developer tidak menaruh default di kode
+    var snapshot = null;
+    try{ snapshot = localStorage.getItem(LS_PROXY_SNAPSHOT); }catch(e){}
+    if(snapshot !== DEFAULT_PROXY_URL){
+      try{
+        localStorage.setItem(LS_PROXY, DEFAULT_PROXY_URL);
+        localStorage.setItem(LS_PROXY_SNAPSHOT, DEFAULT_PROXY_URL);
+      }catch(e){}
+    }
   }
 
   /* ---------------- Modal (boot / settings) ---------------- */
@@ -678,6 +713,10 @@
       try{
         if(proxyUrl) localStorage.setItem(LS_PROXY, proxyUrl);
         else localStorage.removeItem(LS_PROXY);
+        // Catat baseline kode SAAT INI, supaya pengaturan manual ini tidak
+        // tertimpa lagi di kunjungan berikutnya kecuali DEFAULT_PROXY_URL
+        // di kode benar-benar diubah developer setelah ini.
+        localStorage.setItem(LS_PROXY_SNAPSHOT, DEFAULT_PROXY_URL);
       }catch(e){}
       startProxyWarmup();
       state.channels = channels;
@@ -1221,6 +1260,7 @@
     }
   }
 
+  syncProxyDefault();
   boot();
 })();
 </script>
