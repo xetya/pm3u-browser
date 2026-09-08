@@ -636,6 +636,7 @@
         if(proxyUrl) localStorage.setItem(LS_PROXY, proxyUrl);
         else localStorage.removeItem(LS_PROXY);
       }catch(e){}
+      startProxyWarmup();
       state.channels = channels;
       state.hasChannels = true;
       els.modalOverlay.hidden = true;
@@ -761,6 +762,31 @@
     var v = '';
     try{ v = (localStorage.getItem(LS_PROXY) || '').trim(); }catch(e){}
     return v.replace(/\/+$/, '');
+  }
+
+  // "Membangunkan" proxy (Cloudflare Workers/Deno Deploy) lebih awal,
+  // sebelum user sempat pilih channel. Server serverless semacam ini
+  // "tidur" kalau lama tidak dipakai, dan permintaan pertama setelah
+  // tidur bisa butuh beberapa detik ekstra (cold start) — itu penyebab
+  // utama loading awal yang kadang lambat (5-21 detik). Ping ringan ini
+  // tidak menjamin cold start hilang total, tapi membuat instance-nya
+  // kemungkinan besar sudah hangat saat channel benar-benar diputar.
+  var warmupTimer = null;
+  function warmupProxy(){
+    var base = getProxyBase();
+    if(!base) return;
+    try{
+      fetch(base + '/?url=' + encodeURIComponent('https://example.com/warmup.m3u8'), { method: 'GET', cache: 'no-store' })
+        .catch(function(){ /* diam-diam abaikan, ini cuma pemanasan */ });
+    }catch(e){ /* abaikan */ }
+  }
+  function startProxyWarmup(){
+    if(warmupTimer) clearInterval(warmupTimer);
+    warmupProxy();
+    // Ulangi tiap 4 menit selama tab terbuka, supaya instance jarang
+    // sempat "tidur lagi" (banyak platform serverless gratis punya
+    // ambang idle sekitar 5-15 menit sebelum instance dimatikan).
+    warmupTimer = setInterval(warmupProxy, 4 * 60 * 1000);
   }
 
   function buildProxiedUrl(ch, proxyBase){
@@ -1082,6 +1108,7 @@
   /* ---------------- Boot ---------------- */
 
   function boot(){
+    startProxyWarmup();
     var persisted = loadPersisted();
     if(persisted){
       state.channels = persisted.channels;
