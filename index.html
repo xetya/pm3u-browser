@@ -393,6 +393,31 @@
   // deploy ulang.
   var DEFAULT_QUALITY = 'auto';
 
+  // Batas waktu (ms) untuk SATU percobaan mesin pemutar (HLS/MPEG-TS/DASH/
+  // native) sebelum dianggap gagal dan pindah ke mesin berikutnya. Tanpa
+  // batas ini, server yang lambat merespons (bukan langsung menolak) bisa
+  // bikin tiap tahap menggantung lama, dan totalnya menumpuk kalau harus
+  // dicoba lewat beberapa mesin berurutan (bisa lebih dari 15 detik).
+  var ENGINE_TIMEOUT_MS = 7000;
+
+  // "Menjaga" satu percobaan mesin pemutar: kalau video belum benar-benar
+  // MULAI MENGALIR (event 'playing', bukan cuma manifest/metadata berhasil
+  // dimuat) dalam batas waktu ini, paksa gagal supaya cepat pindah ke mesin
+  // berikutnya. Dilepas otomatis begitu video benar-benar mulai jalan.
+  function armWatchdog(token, fail, customMs){
+    var timer = setTimeout(fail, customMs || ENGINE_TIMEOUT_MS);
+    function onPlaying(){
+      if(isStale(token)) return;
+      disarm();
+    }
+    function disarm(){
+      clearTimeout(timer);
+      els.video.removeEventListener('playing', onPlaying);
+    }
+    els.video.addEventListener('playing', onPlaying);
+    return disarm;
+  }
+
   var els = {
     video: document.getElementById('video'),
     playerEmpty: document.getElementById('playerEmpty'),
@@ -947,6 +972,7 @@
     if(isStale(token)) return;
     els.video.src = url;
     var settled = false;
+    var disarmWatchdog;
     function cleanup(){
       els.video.removeEventListener('loadedmetadata', onReady);
       els.video.removeEventListener('error', onErr);
@@ -954,20 +980,21 @@
     function settleFail(){
       if(settled) return;
       settled = true;
+      if(disarmWatchdog) disarmWatchdog();
       cleanup();
       if(!isStale(token)) onFail();
     }
     var onReady = function(){
       if(settled) return;
-      settled = true;
       cleanup();
-      if(!isStale(token)) attemptPlay(token, onFail);
+      if(!isStale(token)) attemptPlay(token, settleFail);
     };
     var onErr = function(){
       settleFail();
     };
     els.video.addEventListener('loadedmetadata', onReady);
     els.video.addEventListener('error', onErr, {once:true});
+    disarmWatchdog = armWatchdog(token, settleFail);
   }
 
   function tryHls(url, token, onFail){
@@ -1000,12 +1027,15 @@
     if(isStale(token)){ try{ hls.destroy(); }catch(e){} return; }
     state.hls = hls;
     var failed = false;
+    var disarmWatchdog;
     function fail(){
       if(failed) return;
       failed = true;
+      if(disarmWatchdog) disarmWatchdog();
       cleanupHls();
       if(!isStale(token)) onFail();
     }
+    disarmWatchdog = armWatchdog(token, fail);
     hls.on(Hls.Events.MANIFEST_PARSED, function(){
       if(isStale(token)) return;
       applyForcedQuality(hls);
@@ -1047,9 +1077,11 @@
       return;
     }
     var failed = false;
+    var disarmWatchdog;
     function fail(){
       if(failed) return;
       failed = true;
+      if(disarmWatchdog) disarmWatchdog();
       cleanupHls();
       if(!isStale(token)) onFail();
     }
@@ -1060,6 +1092,7 @@
       player.attachMediaElement(els.video);
       player.on(mpegts.Events.ERROR, fail);
       player.load();
+      disarmWatchdog = armWatchdog(token, fail);
       attemptPlay(token, fail);
     }catch(e){
       fail();
@@ -1073,9 +1106,11 @@
       return;
     }
     var failed = false;
+    var disarmWatchdog;
     function fail(){
       if(failed) return;
       failed = true;
+      if(disarmWatchdog) disarmWatchdog();
       cleanupHls();
       if(!isStale(token)) onFail();
     }
@@ -1095,7 +1130,8 @@
       // dikonfigurasi, permintaan lisensi ikut dialihkan lewat proxy itu
       // juga (proxy harus meneruskan method POST + body biner, bukan cuma
       // GET seperti manifest/video).
-      if(ch && ch.drmLicenseUrl){
+      var hasDrm = !!(ch && ch.drmLicenseUrl);
+      if(hasDrm){
         var proxyBase = getProxyBase();
         var licenseUrl = proxyBase ? buildProxiedUrlFor(ch.drmLicenseUrl, ch, proxyBase) : ch.drmLicenseUrl;
         var protData = {};
@@ -1107,6 +1143,9 @@
       player.on(dashjs.MediaPlayer.events.STREAM_INITIALIZED, function(){
         applyForcedQualityDash(player);
       });
+      // Channel DRM butuh waktu ekstra (negosiasi lisensi lewat proxy,
+      // kadang kena cold-start juga) — beri toleransi 2x lipat.
+      disarmWatchdog = armWatchdog(token, fail, hasDrm ? ENGINE_TIMEOUT_MS * 2 : ENGINE_TIMEOUT_MS);
       player.initialize(els.video, url, false);
       attemptPlay(token, fail);
     }catch(e){
