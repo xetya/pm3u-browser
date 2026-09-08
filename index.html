@@ -66,6 +66,9 @@
     margin:10px 0 6px; letter-spacing:.01em;
   }
   .modal-sub{ color:var(--text-2); font-size:13.5px; line-height:1.55; margin:0 0 22px;}
+  .field-row{ display:flex; flex-direction:column; gap:0; }
+  .field-col{ min-width:0; }
+  .field-col + .field-col{ margin-top:16px; }
   .field-label{ font-size:11.5px; color:var(--text-3); text-transform:uppercase; letter-spacing:.08em; margin-bottom:7px; display:block; font-family:var(--font-mono);}
   .field-input{
     width:100%; background:#0b0d10; border:1px solid var(--line); color:var(--text-1);
@@ -207,15 +210,28 @@
   /* ---------- Corner settings button ---------- */
   .corner-btn{
     position:fixed; bottom:20px; right:20px; z-index:22;
-    display:flex; align-items:center; gap:8px;
-    background:var(--panel-glass); border:1px solid var(--line); border-radius:100px;
-    padding:9px 14px 9px 10px; color:var(--text-2); font-family:var(--font-mono); font-size:11px;
-    letter-spacing:.05em; cursor:pointer; opacity:0; transform:translateY(6px);
-    transition:opacity .25s, transform .25s;
+    display:flex; align-items:center; justify-content:center;
+    width:42px; height:42px; padding:0;
+    background:var(--panel-glass); border:1px solid var(--line); border-radius:50%;
+    color:var(--text-2); cursor:pointer; opacity:0; transform:translateY(6px);
+    transition:opacity .25s, transform .25s, background .15s;
   }
   .corner-btn.visible{ opacity:1; transform:translateY(0); }
   .corner-btn:hover{ color:var(--text-1); border-color:var(--text-3); }
-  .corner-btn svg{ width:15px; height:15px; }
+  .corner-btn svg{ width:19px; height:19px; }
+
+  /* ---------- Landscape (lebar) modal untuk mode "Ganti Playlist" ---------- */
+  .modal-card.wide{ width:min(760px, 94vw); }
+  .modal-card.wide .field-row{ flex-direction:row; gap:20px; }
+  .modal-card.wide .field-col{ flex:1; }
+  .modal-card.wide .field-col + .field-col{ margin-top:0; }
+  .modal-card.wide .control-legend{ grid-template-columns:repeat(4, 1fr); }
+  @media (max-width:760px){
+    /* Layar sempit (mis. HP tegak): tetap satu kolom walau mode wide aktif */
+    .modal-card.wide .field-row{ flex-direction:column; gap:0; }
+    .modal-card.wide .field-col + .field-col{ margin-top:16px; }
+    .modal-card.wide .control-legend{ grid-template-columns:1fr 1fr; }
+  }
 
   /* ---------- Empty / error state on player ---------- */
   .player-empty{
@@ -297,9 +313,8 @@
 </div>
 
 <!-- Corner settings button -->
-<button class="corner-btn" id="cornerBtn" title="Ganti playlist (S)">
+<button class="corner-btn" id="cornerBtn" title="Ganti playlist (S)" aria-label="Ganti playlist">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.04 1.56V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 9 19.36a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.64 15a1.7 1.7 0 0 0-1.56-1.04H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.64 9a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.64a1.7 1.7 0 0 0 1.04-1.56V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1.04 1.56 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.36 9a1.7 1.7 0 0 0 1.56 1.04H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1.04z"/></svg>
-  Ganti Playlist
 </button>
 
 <!-- Boot / settings modal -->
@@ -309,14 +324,19 @@
     <div class="modal-eyebrow">TUNER</div>
     <div class="modal-title" id="modalTitle">Masukkan Playlist M3U</div>
     <p class="modal-sub" id="modalSub">Tempelkan URL playlist M3U/M3U8 kamu. Setelah berhasil dimuat, playlist ini akan tersimpan otomatis di perangkat ini.</p>
-    <label class="field-label" for="m3uUrl">URL Playlist</label>
-    <input class="field-input" id="m3uUrl" type="url" placeholder="https://contoh.com/playlist.m3u8" autocomplete="off" spellcheck="false">
-    <div class="modal-error" id="modalError"></div>
-
-    <label class="field-label" for="proxyUrl" style="margin-top:16px;">Proxy Server URL (opsional)</label>
-    <input class="field-input" id="proxyUrl" type="url" placeholder="https://nama-worker-kamu.workers.dev" autocomplete="off" spellcheck="false">
-    <div style="font-size:11.5px; color:var(--text-3); margin-top:7px; line-height:1.5;">
-      Kalau diisi, <b>semua channel akan lewat proxy ini</b> (lebih andal — persis seperti aplikasi IPTV lain yang berhasil memutar channel berheader khusus, ditandai <code style="font-family:var(--font-mono);">#EXTVLCOPT</code> di M3U, maupun channel yang diblokir CORS). Kosongkan kalau tidak butuh. Lihat file <code style="font-family:var(--font-mono);">header-proxy-worker.js</code> yang disertakan untuk cara deploy gratisnya di Cloudflare Workers.
+    <div class="field-row">
+      <div class="field-col">
+        <label class="field-label" for="m3uUrl">URL Playlist</label>
+        <input class="field-input" id="m3uUrl" type="url" placeholder="https://contoh.com/playlist.m3u8" autocomplete="off" spellcheck="false">
+        <div class="modal-error" id="modalError"></div>
+      </div>
+      <div class="field-col">
+        <label class="field-label" for="proxyUrl">Proxy Server URL (opsional)</label>
+        <input class="field-input" id="proxyUrl" type="url" placeholder="https://nama-worker-kamu.workers.dev" autocomplete="off" spellcheck="false">
+        <div style="font-size:11.5px; color:var(--text-3); margin-top:7px; line-height:1.5;">
+          Kalau diisi, <b>semua channel akan lewat proxy ini</b> (lebih andal — persis seperti aplikasi IPTV lain yang berhasil memutar channel berheader khusus, ditandai <code style="font-family:var(--font-mono);">#EXTVLCOPT</code> di M3U, maupun channel yang diblokir CORS). Kosongkan kalau tidak butuh. Lihat file <code style="font-family:var(--font-mono);">header-proxy-worker.js</code> yang disertakan untuk cara deploy gratisnya di Cloudflare Workers.
+        </div>
+      </div>
     </div>
 
     <div class="btn-row">
@@ -360,6 +380,7 @@
     numpadDigits: document.getElementById('numpadDigits'),
     cornerBtn: document.getElementById('cornerBtn'),
     modalOverlay: document.getElementById('modalOverlay'),
+    modalCard: document.querySelector('#modalOverlay .modal-card'),
     modalTitle: document.getElementById('modalTitle'),
     modalSub: document.getElementById('modalSub'),
     modalError: document.getElementById('modalError'),
@@ -587,6 +608,7 @@
       els.loadBtn.textContent = 'Mulai Menonton';
       els.modalCloseBtn.hidden = true;
       els.resetRow.hidden = true;
+      els.modalCard.classList.remove('wide');
     } else {
       els.modalTitle.textContent = 'Ganti Playlist';
       els.modalSub.textContent = 'Masukkan URL playlist baru untuk menggantikan playlist yang sedang aktif.';
@@ -594,6 +616,7 @@
       els.modalCloseBtn.hidden = false;
       els.resetRow.hidden = false;
       els.m3uUrl.value = (localStorage.getItem(LS_URL) || '');
+      els.modalCard.classList.add('wide');
     }
     els.proxyUrl.value = (localStorage.getItem(LS_PROXY) || '');
     els.modalError.textContent = '';
@@ -603,6 +626,24 @@
   function closeModal(){
     if(state.modalMode === 'boot' && !state.hasChannels) return; // must load a playlist first
     els.modalOverlay.hidden = true;
+  }
+
+  // Dipakai baik oleh listener keydown global maupun oleh listener di
+  // dalam kolom input (yang men-stop-kan propagasi eventnya sendiri).
+  // Escape selalu menutup modal (kembali ke stream); Backspace hanya
+  // menutup kalau kolom yang sedang fokus sudah kosong, supaya tidak
+  // mengganggu saat pengguna sedang menghapus teks URL. Ini juga
+  // mencakup tombol "kembali" banyak remote Smart TV, yang browser
+  // biasanya terjemahkan sebagai tombol Escape.
+  function handleModalBackKey(e){
+    if(els.modalOverlay.hidden) return false;
+    var isEmptyField = !(e.target && 'value' in e.target) || !e.target.value;
+    if(e.key === 'Escape' || (e.key === 'Backspace' && isEmptyField)){
+      closeModal();
+      e.preventDefault();
+      return true;
+    }
+    return false;
   }
 
   els.modalCloseBtn.addEventListener('click', closeModal);
@@ -652,11 +693,13 @@
 
   els.proxyUrl.addEventListener('keydown', function(e){
     if(e.key === 'Enter') els.loadBtn.click();
+    handleModalBackKey(e);
     e.stopPropagation();
   });
 
   els.m3uUrl.addEventListener('keydown', function(e){
     if(e.key === 'Enter') els.loadBtn.click();
+    handleModalBackKey(e);
     e.stopPropagation();
   });
 
@@ -1064,7 +1107,8 @@
     dismissAutoplayGate();
 
     if(!els.modalOverlay.hidden){
-      return; // modal handles its own keys
+      handleModalBackKey(e);
+      return; // sisanya biar modal yang urus (mengetik di kolom, dsb.)
     }
 
     var k = e.key;
