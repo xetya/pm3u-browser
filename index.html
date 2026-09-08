@@ -435,12 +435,7 @@
     cornerTimer: null,
     hasChannels: false,
     retryTimer: null,
-    retryDelay: 0,
-    stallWatchdog: null,
-    stallLastTime: -1,
-    stallTicks: 0,
-    hlsNetErrCount: 0,
-    hlsMediaErrCount: 0
+    retryDelay: 0
   };
 
   /* ---------------- Utilities ---------------- */
@@ -854,49 +849,6 @@
     }
   }
 
-  // ---- Watchdog "macet diam-diam" -----------------------------------
-  // Sebagian server IPTV publik (tanpa proxy) berhenti mengirim data
-  // tanpa pernah melempar error apa pun ke player — gambar cuma diam di
-  // frame terakhir ("tidak ada sinyal" versi diam). Sebelumnya ini cuma
-  // bisa "sembuh" kalau user pindah channel lalu balik lagi (karena itu
-  // memaksa reload total), atau menunggu sangat lama sampai retry lain
-  // kebetulan jalan. Watchdog ini memantau currentTime video tiap
-  // beberapa detik; kalau macet cukup lama padahal harusnya main, dia
-  // otomatis "sambung ulang" channel yang sama — persis efeknya seperti
-  // pindah channel lalu balik, tapi otomatis.
-  var STALL_CHECK_MS = 6000;
-  var STALL_TICKS_LIMIT = 3; // ~18 detik macet berturut-turut baru dianggap stuck
-  function stopStallWatchdog(){
-    if(state.stallWatchdog){
-      clearInterval(state.stallWatchdog);
-      state.stallWatchdog = null;
-    }
-    state.stallLastTime = -1;
-    state.stallTicks = 0;
-  }
-  function startStallWatchdog(idx, token){
-    stopStallWatchdog();
-    state.stallWatchdog = setInterval(function(){
-      if(isStale(token)){ stopStallWatchdog(); return; }
-      if(!els.playerEmpty.hidden) return; // sudah tampil layar gagal, biarkan alur retry biasa yang urus
-      var v = els.video;
-      if(v.paused || v.ended || v.seeking) { state.stallTicks = 0; return; }
-      var t = v.currentTime;
-      if(t > state.stallLastTime + 0.05){
-        // Waktu maju, berarti sehat.
-        state.stallLastTime = t;
-        state.stallTicks = 0;
-        return;
-      }
-      state.stallTicks++;
-      if(state.stallTicks >= STALL_TICKS_LIMIT){
-        state.stallTicks = 0;
-        toast('Sinyal macet, menyambung ulang…', {pulse:true, sticky:true});
-        startPlayback(idx, true);
-      }
-    }, STALL_CHECK_MS);
-  }
-
   function getExt(url){
     var clean = url.split('?')[0].split('#')[0];
     var m = clean.match(/\.([a-z0-9]+)$/i);
@@ -998,30 +950,10 @@
       abrBandWidthFactor: 0.8,
       abrBandWidthUpFactor: 0.6,
       abrEwmaFastLive: 5.0,
-      abrEwmaSlowLive: 15.0,
-      // Server IPTV publik (tanpa proxy) sering lambat/timeout sesaat atau
-      // memutus koneksi sebentar. Nilai default hls.js terlalu "tidak sabar"
-      // untuk kondisi ini, sehingga error yang sebenarnya sementara langsung
-      // dianggap fatal dan channel jatuh ke layar "tidak ada sinyal". Nilai
-      // di bawah memberi lebih banyak kesempatan & waktu sebelum menyerah.
-      fragLoadingMaxRetry: 8,
-      fragLoadingRetryDelay: 1000,
-      fragLoadingMaxRetryTimeout: 20000,
-      manifestLoadingMaxRetry: 6,
-      manifestLoadingRetryDelay: 1000,
-      manifestLoadingMaxRetryTimeout: 20000,
-      levelLoadingMaxRetry: 6,
-      levelLoadingRetryDelay: 1000,
-      levelLoadingMaxRetryTimeout: 20000,
-      // Beri lebih banyak percobaan "nudge" (dorong sedikit posisi playback)
-      // saat buffer sempat macet, sebelum hls.js menyerah dan melempar
-      // mediaError fatal.
-      nudgeMaxRetry: 6
+      abrEwmaSlowLive: 15.0
     });
     if(isStale(token)){ try{ hls.destroy(); }catch(e){} return; }
     state.hls = hls;
-    state.hlsNetErrCount = 0;
-    state.hlsMediaErrCount = 0;
     var failed = false;
     function fail(){
       if(failed) return;
@@ -1034,35 +966,8 @@
       applyForcedQuality(hls);
       attemptPlay(token, fail);
     });
-    // Sebagian besar error "fatal" dari hls.js sebenarnya bisa pulih sendiri
-    // (koneksi putus sebentar, fragment telat, dsb). Sebelum benar-benar
-    // menyerah (fail(), yang memicu layar "tidak ada sinyal"), coba pulihkan
-    // dulu beberapa kali sesuai jenis errornya — ini yang paling sering
-    // menyelesaikan kasus "kadang ada kadang tidak" tanpa proxy.
     hls.on(Hls.Events.ERROR, function(evt, data){
-      if(isStale(token) || !data) return;
-      if(!data.fatal){
-        return; // non-fatal, hls.js sudah menanganinya sendiri secara internal
-      }
-      if(data.type === Hls.ErrorTypes.NETWORK_ERROR){
-        state.hlsNetErrCount++;
-        if(state.hlsNetErrCount <= 3){
-          // Tunggu sebentar (makin lama makin panjang) lalu muat ulang
-          // manifest/level — ini setara "sambungkan ulang" tanpa membuang
-          // instance player & tanpa memicu layar gagal.
-          setTimeout(function(){
-            if(isStale(token) || failed) return;
-            try{ hls.startLoad(); }catch(e){ fail(); }
-          }, Math.min(1000 * state.hlsNetErrCount, 6000));
-          return;
-        }
-      } else if(data.type === Hls.ErrorTypes.MEDIA_ERROR){
-        state.hlsMediaErrCount++;
-        if(state.hlsMediaErrCount <= 3){
-          try{ hls.recoverMediaError(); return; }catch(e){}
-        }
-      }
-      fail();
+      if(data && data.fatal) fail();
     });
     hls.loadSource(url);
     hls.attachMedia(els.video);
@@ -1337,39 +1242,11 @@
     // lainnya) adalah selalu menitipkan permintaan lewat proxy begitu tersedia.
     var playUrl = proxyBase ? buildProxiedUrl(ch, proxyBase) : ch.url;
 
-    startStallWatchdog(idx, token);
-
-    // Kegagalan di percobaan PERTAMA (baru refresh halaman, atau baru
-    // pindah masuk ke channel ini) sering cuma "start dingin" sesaat —
-    // koneksi/DNS/TLS ke server IPTV belum "siap" walau sebenarnya baik-
-    // baik saja. Sebelumnya begitu gagal langsung tampil layar "tidak ada
-    // sinyal" lalu nunggu jadwal retry lambat (5→30 detik), makanya harus
-    // didiamkan lama baru pulih. Padahal cara yang selama ini terbukti
-    // langsung menyembuhkan adalah pindah ke channel lain lalu balik lagi
-    // — itu efeknya cuma "buat instance player baru dari nol & coba lagi".
-    // Jadi di sini efek itu ditiru otomatis: begitu gagal, langsung coba
-    // ulang PENUH dari nol beberapa kali dengan jeda pendek, sebelum benar-
-    // benar menyerah ke layar gagal + retry lambat.
-    var quickRetries = 0;
-    var QUICK_RETRY_MAX = 5;
-    function attempt(){
-      setupPlayer(playUrl, ext, token, function(){
-        if(isStale(token)) return;
-        if(quickRetries < QUICK_RETRY_MAX){
-          quickRetries++;
-          toast('Menyambungkan ulang… (' + quickRetries + '/' + QUICK_RETRY_MAX + ')', {pulse:true, sticky:true});
-          setTimeout(function(){
-            if(isStale(token)) return;
-            attempt();
-          }, 1000 * quickRetries);
-          return;
-        }
-        stopStallWatchdog();
-        finalPlaybackError();
-        scheduleAutoRetry(idx, token);
-      });
-    }
-    attempt();
+    setupPlayer(playUrl, ext, token, function(){
+      if(isStale(token)) return;
+      finalPlaybackError();
+      scheduleAutoRetry(idx, token);
+    });
   }
 
   function nextChannel(){
