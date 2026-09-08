@@ -378,7 +378,20 @@
   // pengunjung (termasuk yang sudah pernah isi manual sebelumnya) akan
   // otomatis pindah memakai URL baru ini — sampai mereka isi manual lagi
   // lewat kolom pengaturan, yang lalu berlaku sampai baris ini diubah lagi.
-  var DEFAULT_PROXY_URL = 'https://flat-dodo-1598.xetya77.deno.net';
+  var DEFAULT_PROXY_URL = '';
+
+  // ============================================================
+  // KUALITAS/RESOLUSI PAKSA (opsional, edit langsung di sini)
+  // ============================================================
+  // Pilihan: 'auto' (default — hls.js otomatis pilih sesuai kecepatan
+  // internet penonton), 'low', 'medium', 'high'.
+  // Cuma berlaku untuk channel HLS (.m3u8) yang memang menyediakan beberapa
+  // varian resolusi di manifest-nya (multi-bitrate). Channel yang cuma
+  // punya 1 resolusi — paling umum di IPTV — tidak terpengaruh apa pun,
+  // karena memang tidak ada pilihan lain untuk dipilih. Tidak ada kolom
+  // di web untuk ini secara sengaja; kalau mau ubah, edit baris ini lalu
+  // deploy ulang.
+  var DEFAULT_QUALITY = 'auto';
 
   var els = {
     video: document.getElementById('video'),
@@ -949,13 +962,37 @@
       if(!isStale(token)) onFail();
     }
     hls.on(Hls.Events.MANIFEST_PARSED, function(){
-      if(!isStale(token)) attemptPlay(token, fail);
+      if(isStale(token)) return;
+      applyForcedQuality(hls);
+      attemptPlay(token, fail);
     });
     hls.on(Hls.Events.ERROR, function(evt, data){
       if(data && data.fatal) fail();
     });
     hls.loadSource(url);
     hls.attachMedia(els.video);
+  }
+
+  // Memaksa level kualitas HLS sesuai DEFAULT_QUALITY, kalau bukan 'auto'
+  // dan manifest-nya memang punya lebih dari satu varian resolusi. Urutan
+  // level di hls.levels tidak dijamin terurut, jadi diurutkan dulu sendiri
+  // berdasarkan bitrate sebelum memilih indeks rendah/sedang/tinggi.
+  function applyForcedQuality(hls){
+    var mode = DEFAULT_QUALITY;
+    if(!mode || mode === 'auto') return;
+    var levels = hls.levels;
+    if(!levels || levels.length <= 1) return; // cuma 1 resolusi, tidak ada yang bisa dipilih
+    var order = levels.map(function(lv, i){ return i; });
+    order.sort(function(a, b){
+      return (levels[a].bitrate || 0) - (levels[b].bitrate || 0);
+    });
+    var chosen = -1;
+    if(mode === 'low') chosen = order[0];
+    else if(mode === 'high') chosen = order[order.length - 1];
+    else if(mode === 'medium') chosen = order[Math.floor((order.length - 1) / 2)];
+    if(chosen >= 0){
+      hls.currentLevel = chosen; // set eksplisit -> otomatis mematikan ABR bawaan
+    }
   }
 
   function tryMpegts(url, kind, token, onFail){
@@ -1003,11 +1040,38 @@
       state.dash = player;
       player.updateSettings({ streaming: { text: { defaultEnabled: false } } });
       player.on(dashjs.MediaPlayer.events.ERROR, fail);
+      player.on(dashjs.MediaPlayer.events.STREAM_INITIALIZED, function(){
+        applyForcedQualityDash(player);
+      });
       player.initialize(els.video, url, false);
       attemptPlay(token, fail);
     }catch(e){
       fail();
     }
+  }
+
+  // Versi dash.js dari applyForcedQuality — logikanya sama (urutkan
+  // berdasarkan bitrate, pilih indeks rendah/sedang/tinggi), API-nya
+  // saja yang beda dari hls.js.
+  function applyForcedQualityDash(player){
+    var mode = DEFAULT_QUALITY;
+    if(!mode || mode === 'auto') return;
+    try{
+      var bitrates = player.getBitrateInfoListFor('video');
+      if(!bitrates || bitrates.length <= 1) return;
+      var order = bitrates.map(function(b, i){ return i; });
+      order.sort(function(a, b){
+        return (bitrates[a].bitrate || 0) - (bitrates[b].bitrate || 0);
+      });
+      var chosen = -1;
+      if(mode === 'low') chosen = order[0];
+      else if(mode === 'high') chosen = order[order.length - 1];
+      else if(mode === 'medium') chosen = order[Math.floor((order.length - 1) / 2)];
+      if(chosen >= 0){
+        player.updateSettings({ streaming: { abr: { autoSwitchBitrate: { video: false } } } });
+        player.setQualityFor('video', chosen);
+      }
+    }catch(e){ /* dash.js versi lama mungkin API-nya beda, abaikan diam-diam */ }
   }
 
   function finalPlaybackError(){
