@@ -882,7 +882,22 @@
       }
       return;
     }
-    var hls = new Hls({ maxBufferLength: 30, liveDurationInfinity:true });
+    var hls = new Hls({
+      maxBufferLength: 30,
+      liveDurationInfinity: true,
+      // Jangan pilih resolusi lebih besar dari ukuran tampilan videonya —
+      // tidak ada gunanya memaksa 1080p kalau yang ditampilkan cuma
+      // sekian ratus piksel di layar.
+      capLevelToPlayerSize: true,
+      // ABR (auto-quality) dibuat lebih "santai": naik ke resolusi lebih
+      // tinggi hanya kalau bandwidth benar-benar longgar & stabil, dan
+      // bereaksi lebih halus (tidak gampang kepancing lonjakan sesaat)
+      // supaya tidak bolak-balik ganti kualitas tiap ada sedikit fluktuasi.
+      abrBandWidthFactor: 0.8,
+      abrBandWidthUpFactor: 0.6,
+      abrEwmaFastLive: 5.0,
+      abrEwmaSlowLive: 15.0
+    });
     if(isStale(token)){ try{ hls.destroy(); }catch(e){} return; }
     state.hls = hls;
     var failed = false;
