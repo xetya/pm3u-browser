@@ -393,31 +393,6 @@
   // deploy ulang.
   var DEFAULT_QUALITY = 'auto';
 
-  // Batas waktu (ms) untuk SATU percobaan mesin pemutar (HLS/MPEG-TS/DASH/
-  // native) sebelum dianggap gagal dan pindah ke mesin berikutnya. Tanpa
-  // batas ini, server yang lambat merespons (bukan langsung menolak) bisa
-  // bikin tiap tahap menggantung lama, dan totalnya menumpuk kalau harus
-  // dicoba lewat beberapa mesin berurutan (bisa lebih dari 15 detik).
-  var ENGINE_TIMEOUT_MS = 7000;
-
-  // "Menjaga" satu percobaan mesin pemutar: kalau video belum benar-benar
-  // MULAI MENGALIR (event 'playing', bukan cuma manifest/metadata berhasil
-  // dimuat) dalam batas waktu ini, paksa gagal supaya cepat pindah ke mesin
-  // berikutnya. Dilepas otomatis begitu video benar-benar mulai jalan.
-  function armWatchdog(token, fail, customMs){
-    var timer = setTimeout(fail, customMs || ENGINE_TIMEOUT_MS);
-    function onPlaying(){
-      if(isStale(token)) return;
-      disarm();
-    }
-    function disarm(){
-      clearTimeout(timer);
-      els.video.removeEventListener('playing', onPlaying);
-    }
-    els.video.addEventListener('playing', onPlaying);
-    return disarm;
-  }
-
   var els = {
     video: document.getElementById('video'),
     playerEmpty: document.getElementById('playerEmpty'),
@@ -972,7 +947,6 @@
     if(isStale(token)) return;
     els.video.src = url;
     var settled = false;
-    var disarmWatchdog;
     function cleanup(){
       els.video.removeEventListener('loadedmetadata', onReady);
       els.video.removeEventListener('error', onErr);
@@ -980,21 +954,20 @@
     function settleFail(){
       if(settled) return;
       settled = true;
-      if(disarmWatchdog) disarmWatchdog();
       cleanup();
       if(!isStale(token)) onFail();
     }
     var onReady = function(){
       if(settled) return;
+      settled = true;
       cleanup();
-      if(!isStale(token)) attemptPlay(token, settleFail);
+      if(!isStale(token)) attemptPlay(token, onFail);
     };
     var onErr = function(){
       settleFail();
     };
     els.video.addEventListener('loadedmetadata', onReady);
     els.video.addEventListener('error', onErr, {once:true});
-    disarmWatchdog = armWatchdog(token, settleFail);
   }
 
   function tryHls(url, token, onFail){
@@ -1022,20 +995,32 @@
       abrBandWidthFactor: 0.8,
       abrBandWidthUpFactor: 0.6,
       abrEwmaFastLive: 5.0,
-      abrEwmaSlowLive: 15.0
+      abrEwmaSlowLive: 15.0,
+      // hls.js secara default punya percobaan ulang internal yang lumayan
+      // banyak (level: 4x, segmen: 6x) dengan jeda yang membesar tiap
+      // gagal — itu semua terjadi DULU sebelum akhirnya lapor gagal ke
+      // kode kita. Kalau ditumpuk dengan retry-otomatis kita sendiri
+      // (lihat scheduleAutoRetry), totalnya bisa lebih dari 1 menit padahal
+      // server aslinya cepat. Di sini sengaja dibuat CEPAT MENYERAH secara
+      // internal, supaya retry versi kita (yang bongkar-pasang bersih dari
+      // nol — biasanya lebih berhasil, mirip pindah channel manual) yang
+      // ambil alih lebih cepat.
+      manifestLoadingMaxRetry: 1,
+      manifestLoadingRetryDelay: 500,
+      levelLoadingMaxRetry: 1,
+      levelLoadingRetryDelay: 500,
+      fragLoadingMaxRetry: 2,
+      fragLoadingRetryDelay: 500
     });
     if(isStale(token)){ try{ hls.destroy(); }catch(e){} return; }
     state.hls = hls;
     var failed = false;
-    var disarmWatchdog;
     function fail(){
       if(failed) return;
       failed = true;
-      if(disarmWatchdog) disarmWatchdog();
       cleanupHls();
       if(!isStale(token)) onFail();
     }
-    disarmWatchdog = armWatchdog(token, fail);
     hls.on(Hls.Events.MANIFEST_PARSED, function(){
       if(isStale(token)) return;
       applyForcedQuality(hls);
@@ -1077,11 +1062,9 @@
       return;
     }
     var failed = false;
-    var disarmWatchdog;
     function fail(){
       if(failed) return;
       failed = true;
-      if(disarmWatchdog) disarmWatchdog();
       cleanupHls();
       if(!isStale(token)) onFail();
     }
@@ -1092,7 +1075,6 @@
       player.attachMediaElement(els.video);
       player.on(mpegts.Events.ERROR, fail);
       player.load();
-      disarmWatchdog = armWatchdog(token, fail);
       attemptPlay(token, fail);
     }catch(e){
       fail();
@@ -1106,11 +1088,9 @@
       return;
     }
     var failed = false;
-    var disarmWatchdog;
     function fail(){
       if(failed) return;
       failed = true;
-      if(disarmWatchdog) disarmWatchdog();
       cleanupHls();
       if(!isStale(token)) onFail();
     }
@@ -1130,8 +1110,7 @@
       // dikonfigurasi, permintaan lisensi ikut dialihkan lewat proxy itu
       // juga (proxy harus meneruskan method POST + body biner, bukan cuma
       // GET seperti manifest/video).
-      var hasDrm = !!(ch && ch.drmLicenseUrl);
-      if(hasDrm){
+      if(ch && ch.drmLicenseUrl){
         var proxyBase = getProxyBase();
         var licenseUrl = proxyBase ? buildProxiedUrlFor(ch.drmLicenseUrl, ch, proxyBase) : ch.drmLicenseUrl;
         var protData = {};
@@ -1143,9 +1122,6 @@
       player.on(dashjs.MediaPlayer.events.STREAM_INITIALIZED, function(){
         applyForcedQualityDash(player);
       });
-      // Channel DRM butuh waktu ekstra (negosiasi lisensi lewat proxy,
-      // kadang kena cold-start juga) — beri toleransi 2x lipat.
-      disarmWatchdog = armWatchdog(token, fail, hasDrm ? ENGINE_TIMEOUT_MS * 2 : ENGINE_TIMEOUT_MS);
       player.initialize(els.video, url, false);
       attemptPlay(token, fail);
     }catch(e){
@@ -1185,12 +1161,16 @@
 
   // Coba ulang otomatis kalau koneksi/stream sempat putus lalu pulih —
   // tanpa ini, channel akan diam macet di layar "tidak ada sinyal"
-  // selamanya walau internetnya sudah kembali normal. Jaraknya makin
-  // lama makin panjang (5s, 10s, 20s, maks 30s) supaya tidak membanjiri
-  // server dengan percobaan kalau memang sedang benar-benar mati total.
+  // selamanya walau internetnya sudah kembali normal. Percobaan pertama
+  // dibuat CEPAT (1.5 detik) karena kegagalan pertama kali biasanya cuma
+  // hiccup sesaat — sama seperti waktu pindah channel lalu balik lagi
+  // manual, biasanya langsung berhasil. Kalau ternyata gagal berulang
+  // kali (bukan cuma sesekali), baru jaraknya makin melebar (3s, 6s, 12s,
+  // maks 30s) supaya tidak membanjiri server kalau memang sedang benar-
+  // benar mati total.
   function scheduleAutoRetry(idx, token){
     if(state.retryTimer) clearTimeout(state.retryTimer);
-    state.retryDelay = state.retryDelay ? Math.min(state.retryDelay * 2, 30000) : 5000;
+    state.retryDelay = state.retryDelay ? Math.min(state.retryDelay * 2, 30000) : 1500;
     state.retryTimer = setTimeout(function(){
       state.retryTimer = null;
       if(isStale(token)) return; // sudah pindah channel lain, batalkan
