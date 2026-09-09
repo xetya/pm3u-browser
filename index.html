@@ -996,21 +996,29 @@
       abrBandWidthUpFactor: 0.6,
       abrEwmaFastLive: 5.0,
       abrEwmaSlowLive: 15.0,
-      // hls.js secara default punya percobaan ulang internal yang lumayan
-      // banyak (level: 4x, segmen: 6x) dengan jeda yang membesar tiap
-      // gagal — itu semua terjadi DULU sebelum akhirnya lapor gagal ke
-      // kode kita. Kalau ditumpuk dengan retry-otomatis kita sendiri
-      // (lihat scheduleAutoRetry), totalnya bisa lebih dari 1 menit padahal
-      // server aslinya cepat. Di sini sengaja dibuat CEPAT MENYERAH secara
-      // internal, supaya retry versi kita (yang bongkar-pasang bersih dari
-      // nol — biasanya lebih berhasil, mirip pindah channel manual) yang
-      // ambil alih lebih cepat.
+      // Selalu mulai dari kualitas PALING RENDAH. Kalau dibiarkan hls.js
+      // menebak sendiri (auto), tebakan pertama bisa kejauhan buat koneksi
+      // pas-pasan — segmen pertama saja sudah gagal, langsung memicu
+      // siklus gagal-coba lagi. Mulai dari bawah selalu aman; ABR di atas
+      // baru menaikkan kualitas kalau memang benar-benar stabil.
+      startLevel: 0,
+      // manifest/level (cuma teks kecil) tetap dibuat cepat menyerah —
+      // ini soal koneksi PERTAMA KALI ke server (DNS/TLS baru), bukan
+      // soal kecepatan sambungan yang sedang berjalan.
       manifestLoadingMaxRetry: 1,
       manifestLoadingRetryDelay: 500,
       levelLoadingMaxRetry: 1,
       levelLoadingRetryDelay: 500,
-      fragLoadingMaxRetry: 2,
-      fragLoadingRetryDelay: 500
+      // TAPI segmen video (fragLoading) sengaja dibuat SABAR — ini konten
+      // asli yang memang butuh waktu lebih lama diunduh kalau koneksi
+      // lagi pas-pasan (1-2 Mbps ke bawah), BUKAN tanda server bermasalah.
+      // Kalau ini dibuat cepat menyerah juga (seperti sebelumnya), setiap
+      // segmen yang sedikit lambat langsung dianggap gagal total dan
+      // memicu bongkar-pasang ulang pemutar dari nol — makin memboroskan
+      // bandwidth yang memang sudah pas-pasan, jadi siklus freeze terus.
+      fragLoadingMaxRetry: 8,
+      fragLoadingRetryDelay: 1000,
+      fragLoadingMaxRetryTimeout: 64000
     });
     if(isStale(token)){ try{ hls.destroy(); }catch(e){} return; }
     state.hls = hls;
@@ -1027,7 +1035,30 @@
       attemptPlay(token, fail);
     });
     hls.on(Hls.Events.ERROR, function(evt, data){
-      if(data && data.fatal) fail();
+      if(!data || !data.fatal) return;
+      // Sebelum membongkar total pemutar (mahal — unduh ulang manifest +
+      // segmen dari nol, buruk untuk koneksi yang memang sudah pas-pasan),
+      // coba dulu cara pemulihan ringan bawaan hls.js: cukup lanjutkan
+      // proses muat ulang di tempat, tanpa reset total. Cuma dicoba SEKALI
+      // per jenis error per sesi channel ini — kalau masih gagal lagi
+      // setelahnya, baru benar-benar bongkar total & serahkan ke
+      // scheduleAutoRetry.
+      if(data.type === Hls.ErrorTypes.NETWORK_ERROR && !hls._netRecoverTried){
+        hls._netRecoverTried = true;
+        try{ hls.startLoad(); return; }catch(e){}
+      } else if(data.type === Hls.ErrorTypes.MEDIA_ERROR && !hls._mediaRecoverTried){
+        hls._mediaRecoverTried = true;
+        try{ hls.recoverMediaError(); return; }catch(e){}
+      }
+      fail();
+    });
+    // Progres berhasil (segmen baru masuk) berarti pemulihan tadi jalan —
+    // reset supaya error fatal berikutnya (kalau ada) dapat jatah 1x
+    // percobaan pemulihan ringan lagi, bukan langsung dianggap "sudah
+    // pernah dicoba".
+    hls.on(Hls.Events.FRAG_BUFFERED, function(){
+      hls._netRecoverTried = false;
+      hls._mediaRecoverTried = false;
     });
     hls.loadSource(url);
     hls.attachMedia(els.video);
