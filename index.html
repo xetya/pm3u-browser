@@ -1196,12 +1196,15 @@
   // dibuat CEPAT (1.5 detik) karena kegagalan pertama kali biasanya cuma
   // hiccup sesaat — sama seperti waktu pindah channel lalu balik lagi
   // manual, biasanya langsung berhasil. Kalau ternyata gagal berulang
-  // kali (bukan cuma sesekali), baru jaraknya makin melebar (3s, 6s, 12s,
-  // maks 30s) supaya tidak membanjiri server kalau memang sedang benar-
-  // benar mati total.
+  // kali (bukan cuma sesekali), baru jaraknya makin melebar (3s, 6s, 8s)
+  // tapi dibatasi maks 8 detik saja — sengaja tidak dibuat sampai
+  // puluhan detik, karena event "online" dari browser TIDAK selalu
+  // terpicu saat internet pulih (cuma mendeteksi adapter WiFi/kabel
+  // nyambung-putus, bukan status internet sungguhan) — jadi jadwal
+  // berkala inilah yang jadi jalur pemulihan utama, bukan cuma cadangan.
   function scheduleAutoRetry(idx, token){
     if(state.retryTimer) clearTimeout(state.retryTimer);
-    state.retryDelay = state.retryDelay ? Math.min(state.retryDelay * 2, 30000) : 1500;
+    state.retryDelay = state.retryDelay ? Math.min(state.retryDelay * 2, 8000) : 1500;
     state.retryTimer = setTimeout(function(){
       state.retryTimer = null;
       if(isStale(token)) return; // sudah pindah channel lain, batalkan
