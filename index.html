@@ -1131,22 +1131,58 @@
       state.dash = player;
       player.updateSettings({ streaming: { text: { defaultEnabled: false } } });
 
-      // Channel DASH terenkripsi (mis. Widevine) menyertakan URL license
-      // server sendiri di playlist (#KODIPROP:...license_key=...). Browser
-      // butuh CDM bawaan (Chrome/Edge/Android punya Widevine; Safari
-      // TIDAK punya Widevine sama sekali — cuma FairPlay) untuk benar-benar
-      // mendekripsi videonya; kita cuma menjembatani permintaan lisensinya.
-      // Permintaan lisensi itu sendiri juga butuh header Referer/UA palsu
-      // yang browser tidak bisa kirim langsung, jadi kalau proxy sudah
-      // dikonfigurasi, permintaan lisensi ikut dialihkan lewat proxy itu
-      // juga (proxy harus meneruskan method POST + body biner, bukan cuma
-      // GET seperti manifest/video).
-      if(ch && ch.drmLicenseUrl){
-        var proxyBase = getProxyBase();
+      // Channel DASH terenkripsi menyertakan info DRM sendiri di playlist
+      // (#KODIPROP:...license_type=.../license_key=...). Ada 2 jenis yang
+      // penanganannya BEDA TOTAL:
+      //  - "clearkey": license_key isinya pasangan KID:KEY heksadesimal
+      //    langsung (mis. "d386...9c:3404...98") — BUKAN alamat server.
+      //    dash.js bisa mendekripsi memakai kunci ini secara LOKAL, tanpa
+      //    perlu menghubungi server lisensi mana pun.
+      //  - selain itu (mis. "com.widevine.alpha"): license_key adalah URL
+      //    server lisensi sungguhan yang perlu dihubungi (lewat proxy,
+      //    supaya Referer/UA palsunya ikut terkirim — sama seperti
+      //    manifest/video). Browser butuh CDM bawaan (Chrome/Edge/Android
+      //    punya Widevine; Safari TIDAK punya sama sekali) untuk benar-
+      //    benar mendekripsinya; kita cuma menjembatani permintaannya.
+      var proxyBase = getProxyBase();
+      if(ch && ch.drmType && String(ch.drmType).toLowerCase() === 'clearkey' && ch.drmLicenseUrl){
+        var kidKey = ch.drmLicenseUrl.split(':');
+        if(kidKey.length === 2){
+          var clearProt = { 'org.w3.clearkey': { clearkeys: {} } };
+          clearProt['org.w3.clearkey'].clearkeys[kidKey[0].trim()] = kidKey[1].trim();
+          player.setProtectionData(clearProt);
+        }
+      } else if(ch && ch.drmLicenseUrl){
         var licenseUrl = proxyBase ? buildProxiedUrlFor(ch.drmLicenseUrl, ch, proxyBase) : ch.drmLicenseUrl;
         var protData = {};
         protData[ch.drmType || 'com.widevine.alpha'] = { serverURL: licenseUrl };
         player.setProtectionData(protData);
+      }
+
+      // KRUSIAL: manifest DASH (.mpd) merujuk segmen videonya lewat
+      // <BaseURL> + template (mis. $Number$) yang disusun ULANG oleh
+      // dash.js sendiri di browser saat pemutaran — bukan baris teks statis
+      // seperti HLS. Akibatnya, memproxy URL manifest awal saja TIDAK
+      // CUKUP: setiap segmen video sesudahnya tetap diminta dash.js
+      // LANGSUNG ke CDN asli, kena tembok CORS/Referer yang sama. Dengan
+      // RequestModifier ini, SETIAP permintaan jaringan dash.js (manifest,
+      // segmen, maupun lisensi DRM) dialihkan lewat proxy yang sama —
+      // dash.js tetap menyusun URL aslinya sendiri seperti biasa, cuma
+      // detik terakhir sebelum benar-benar di-fetch, kita bungkus lewat
+      // proxy dulu.
+      if(proxyBase && ch){
+        player.extend('RequestModifier', function(){
+          return {
+            modifyRequestURL: function(reqUrl){
+              // Jangan proxy dobel kalau reqUrl kebetulan sudah berupa
+              // URL proxy kita sendiri (mis. manifest awal yang memang
+              // sudah dibungkus sebelum masuk ke dash.js).
+              if(reqUrl.indexOf(proxyBase) === 0) return reqUrl;
+              return buildProxiedUrlFor(reqUrl, ch, proxyBase);
+            },
+            modifyRequestHeader: function(xhr){ return xhr; }
+          };
+        }, true);
       }
 
       player.on(dashjs.MediaPlayer.events.ERROR, fail);
