@@ -1112,6 +1112,25 @@
     }
   }
 
+  // Ubah string heksadesimal (mis. "d386...9c") jadi base64url — format
+  // yang dibutuhkan dash.js untuk KID/KEY di protectionData clearkey.
+  // Balikan null kalau hex-nya tidak valid (panjang ganjil/karakter aneh)
+  // supaya pemanggilnya tahu untuk tidak melanjutkan dengan data rusak.
+  function hexToBase64Url(hex){
+    if(!hex) return null;
+    hex = hex.replace(/[^0-9a-fA-F]/g, '');
+    if(!hex || hex.length % 2 !== 0) return null;
+    try{
+      var bytes = new Uint8Array(hex.length / 2);
+      for(var i=0;i<bytes.length;i++){
+        bytes[i] = parseInt(hex.substr(i*2,2), 16);
+      }
+      var binary = '';
+      for(var j=0;j<bytes.length;j++) binary += String.fromCharCode(bytes[j]);
+      return btoa(binary).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+    }catch(e){ return null; }
+  }
+
   function tryDash(url, token, ch, onFail){
     if(isStale(token)) return;
     if(!window.dashjs){
@@ -1145,14 +1164,35 @@
       //    punya Widevine; Safari TIDAK punya sama sekali) untuk benar-
       //    benar mendekripsinya; kita cuma menjembatani permintaannya.
       var proxyBase = getProxyBase();
-      if(ch && ch.drmType && String(ch.drmType).toLowerCase() === 'clearkey' && ch.drmLicenseUrl){
+      if(ch && ch.drmType && String(ch.drmType).toLowerCase() === 'clearkey' && ch.drmLicenseUrl && !/^https?:\/\//i.test(ch.drmLicenseUrl)){
+        // Format "KID:KEY" heksadesimal langsung (BUKAN URL) — didekripsi
+        // LOKAL oleh dash.js, tanpa perlu menghubungi server mana pun.
+        //
+        // BUG YANG DIPERBAIKI: dash.js men-generate respons lisensi
+        // clearkey secara lokal dari peta `clearkeys`, TAPI ia meminta
+        // KID & KEY dalam format base64url — bukan hex mentah seperti
+        // yang tertulis di playlist. Kalau diserahkan sebagai hex mentah
+        // (seperti sebelumnya), dash.js gagal mengenalinya sebagai kunci
+        // valid, lalu diam-diam beralih mencoba mengirim permintaan
+        // lisensi SUNGGUHAN lewat jaringan (padahal tidak ada server yang
+        // dituju) — persis sumber pesan "DRM: No license url specified"
+        // / "error sending update message" yang muncul di console.
         var kidKey = ch.drmLicenseUrl.split(':');
         if(kidKey.length === 2){
-          var clearProt = { 'org.w3.clearkey': { clearkeys: {} } };
-          clearProt['org.w3.clearkey'].clearkeys[kidKey[0].trim()] = kidKey[1].trim();
-          player.setProtectionData(clearProt);
+          var kidB64 = hexToBase64Url(kidKey[0].trim());
+          var keyB64 = hexToBase64Url(kidKey[1].trim());
+          if(kidB64 && keyB64){
+            var clearProt = { 'org.w3.clearkey': { clearkeys: {} } };
+            clearProt['org.w3.clearkey'].clearkeys[kidB64] = keyB64;
+            player.setProtectionData(clearProt);
+          }
         }
       } else if(ch && ch.drmLicenseUrl){
+        // Widevine (URL server sungguhan), ATAU clearkey varian lain yang
+        // license_key-nya berupa URL (mis. "https://.../?keyid=..&key=..")
+        // — beberapa playlist memakai server clearkey publik yang memang
+        // dirancang menjawab permintaan lisensi standar EME. Keduanya
+        // sama-sama perlu dihubungi lewat jaringan (lewat proxy).
         var licenseUrl = proxyBase ? buildProxiedUrlFor(ch.drmLicenseUrl, ch, proxyBase) : ch.drmLicenseUrl;
         var protData = {};
         protData[ch.drmType || 'com.widevine.alpha'] = { serverURL: licenseUrl };
