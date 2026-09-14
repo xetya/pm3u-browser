@@ -1651,6 +1651,26 @@
     startPlayback((state.currentIndex - 1 + state.channels.length) % state.channels.length);
   }
 
+  // Diminta masuk fullscreen lewat tombol channel naik/turun & angka di
+  // remote — ini "menumpang" izin interaksi pengguna yang sudah sah dari
+  // penekanan tombol tersebut (keydown asli dihitung sebagai gestur
+  // pengguna oleh browser, sama seperti klik). SENGAJA dipanggil langsung
+  // di dalam handler keydown itu sendiri (bukan dari fungsi lain yang
+  // mungkin dipanggil belakangan lewat setTimeout, mis. commitNumberBuffer
+  // via jeda ketik nomor) — begitu izin gestur "kadaluarsa", permintaan
+  // fullscreen dari kode akan ditolak diam-diam oleh browser.
+  function tryEnterFullscreen(){
+    if(document.fullscreenElement || document.webkitFullscreenElement) return;
+    var el = document.documentElement;
+    try{
+      if(el.requestFullscreen) el.requestFullscreen();
+      else if(el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+      else if(el.webkitRequestFullScreen) el.webkitRequestFullScreen(); // ejaan lama sebagian browser TV
+      else if(el.mozRequestFullScreen) el.mozRequestFullScreen();
+      else if(el.msRequestFullscreen) el.msRequestFullscreen();
+    }catch(e){ /* tidak didukung / ditolak — biarkan saja, jangan sampai error */ }
+  }
+
   /* ---------------- Keyboard / remote control ---------------- */
 
   window.addEventListener('keydown', function(e){
@@ -1664,13 +1684,13 @@
     var k = e.key;
 
     if(k === 'PageUp' || k === 'ArrowUp' || k === 'ChannelUp' || e.keyCode === 33){
-      e.preventDefault(); nextChannel(); return;
+      e.preventDefault(); tryEnterFullscreen(); nextChannel(); return;
     }
     if(k === 'PageDown' || k === 'ArrowDown' || k === 'ChannelDown' || e.keyCode === 34){
-      e.preventDefault(); prevChannel(); return;
+      e.preventDefault(); tryEnterFullscreen(); prevChannel(); return;
     }
     if(/^[0-9]$/.test(k)){
-      handleDigit(k); return;
+      tryEnterFullscreen(); handleDigit(k); return;
     }
     if(k === 'Enter'){
       if(state.numberBuffer){
