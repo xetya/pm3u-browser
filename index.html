@@ -1355,7 +1355,16 @@
       //    punya Widevine; Safari TIDAK punya sama sekali) untuk benar-
       //    benar mendekripsinya; kita cuma menjembatani permintaannya.
       var proxyBase = getProxyBase();
-      if(ch && ch.drmType && String(ch.drmType).toLowerCase() === 'clearkey' && ch.drmLicenseUrl && !/^https?:\/\//i.test(ch.drmLicenseUrl)){
+      // CATATAN PERBAIKAN: playlist umumnya menulis license_type dengan
+      // nama DRM-system standar "org.w3.clearkey" (bukan cuma "clearkey"
+      // polos). Sebelumnya kode ini cuma cocok kalau nilainya PERSIS
+      // "clearkey", jadi "org.w3.clearkey" lolos ke cabang else di bawah
+      // dan license_key (yang isinya "KID:KEY" heksadesimal, BUKAN URL)
+      // malah diperlakukan sebagai URL server lisensi asli — itulah
+      // sumber error "DRM: No license server url specified" di console.
+      // Cek sekarang pakai .indexOf('clearkey') supaya kedua penulisan
+      // ("clearkey" maupun "org.w3.clearkey") sama-sama terdeteksi.
+      if(ch && ch.drmType && String(ch.drmType).toLowerCase().indexOf('clearkey') !== -1 && ch.drmLicenseUrl && !/^https?:\/\//i.test(ch.drmLicenseUrl)){
         // Format "KID:KEY" heksadesimal langsung (BUKAN URL) — didekripsi
         // LOKAL oleh dash.js, tanpa perlu menghubungi server mana pun.
         //
