@@ -165,6 +165,11 @@
   .osd-info{ flex:1; min-width:0; }
   .osd-name{ font-family:var(--font-display); font-weight:600; font-size:20px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .osd-meta{ display:flex; align-items:center; gap:8px; margin-top:5px; }
+  .osd-epg{
+    margin-top:6px; font-size:12.5px; color:var(--text-2); line-height:1.4;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100%;
+  }
+  .osd-epg b{ color:var(--text-1); font-weight:600; }
   .osd-tag{
     font-family:var(--font-mono); font-size:10.5px; letter-spacing:.06em; color:var(--text-2);
     background:rgba(255,255,255,.05); border:1px solid var(--line); padding:3px 8px; border-radius:5px;
@@ -290,6 +295,7 @@
         <span class="osd-live">LIVE</span>
         <span class="osd-tag" id="osdGroup" hidden></span>
       </div>
+      <div class="osd-epg" id="osdEpg" hidden></div>
     </div>
     <div class="osd-right">
       <div class="osd-clock" id="osdClock">--:--</div>
@@ -360,6 +366,7 @@
 
   var LS_URL = 'tuner_playlist_url';
   var LS_CHANNELS = 'tuner_channels';
+  var LS_EPG_URLS = 'tuner_epg_urls';
   var LS_LAST = 'tuner_last_channel_number';
   var LS_PROXY = 'tuner_header_proxy_url';
   var LS_PROXY_SNAPSHOT = 'tuner_header_proxy_default_snapshot';
@@ -405,6 +412,7 @@
     osdNumber: document.getElementById('osdNumber'),
     osdName: document.getElementById('osdName'),
     osdGroup: document.getElementById('osdGroup'),
+    osdEpg: document.getElementById('osdEpg'),
     osdClock: document.getElementById('osdClock'),
     numpadOverlay: document.getElementById('numpadOverlay'),
     numpadDigits: document.getElementById('numpadDigits'),
@@ -425,6 +433,8 @@
   var state = {
     channels: [],
     currentIndex: 0,
+    epgIndex: null,
+    epgToken: 0,
     numberBuffer: '',
     numberTimer: null,
     hls: null,
@@ -472,6 +482,19 @@
     var pendingHeaders = {};
     var pendingDrm = {};
     var attrRegex = /([a-zA-Z0-9_-]+)="([^"]*)"/g;
+
+    // Ambil daftar URL EPG (XMLTV) dari baris #EXTM3U paling atas, kalau
+    // ada — atribut url-tvg/x-tvg-url bisa berisi BEBERAPA URL dipisah
+    // koma. Cuma diambil dari baris pertama file (baris header asli),
+    // bukan dari sembarang tempat, biar tidak salah tangkap.
+    var epgUrls = [];
+    var firstLine = (lines[0] || '').trim();
+    if(/^#EXTM3U/i.test(firstLine)){
+      var epgAttrMatch = firstLine.match(/(?:url-tvg|x-tvg-url)="([^"]*)"/i);
+      if(epgAttrMatch && epgAttrMatch[1]){
+        epgUrls = epgAttrMatch[1].split(',').map(function(u){ return u.trim(); }).filter(Boolean);
+      }
+    }
 
     function applyVlcOpt(line){
       // Terima ejaan "http-referer" (1 huruf r, ejaan resmi header HTTP)
@@ -544,6 +567,13 @@
     for(var i=0;i<lines.length;i++){
       var line = lines[i].trim();
       if(!line) continue;
+      // Toleransi typo umum: baris "EXTINF:..." yang kehilangan tanda
+      // pagar (#) di depannya (playlist hasil sunting manual/gabungan
+      // sering begini) — tanpa ini, baris itu salah dibaca sebagai URL
+      // biasa dan channel-nya kehilangan nama/logo aslinya.
+      if(!/^#/.test(line) && /^EXTINF:/i.test(line)){
+        line = '#' + line;
+      }
       if(line.charAt(0) === '#'){
         var upper = line.toUpperCase();
         if(upper.indexOf('#EXTINF') === 0){
@@ -565,8 +595,26 @@
             name: name || 'Tanpa Nama',
             logo: attrs['tvg-logo'] || '',
             group: attrs['group-title'] || '',
+            tvgId: attrs['tvg-id'] || '',
             number: chno
           };
+          // Langsung "bakukan" header/DRM yang tertunda (dari baris SEBELUM
+          // EXTINF ini) ke channel yang baru dibuat, lalu KOSONGKAN
+          // penampungnya. Ini PENTING: banyak playlist punya pola "blok
+          // mati" — EXTINF + header/DRM lengkap tapi URL-nya di-### (tidak
+          // pernah terpakai) — dan tanpa reset ini, sisa header/DRM dari
+          // blok mati tersebut bisa "bocor" ke channel BERIKUTNYA yang
+          // sama sekali tidak berhubungan (mis. origin milik provider A
+          // ikut menempel ke channel provider B), karena penampungnya
+          // baru dikosongkan saat URL benar-benar ditemukan, bukan saat
+          // blok lama ditinggalkan begitu saja.
+          if(pendingHeaders.referer) current.referer = pendingHeaders.referer;
+          if(pendingHeaders.userAgent) current.userAgent = pendingHeaders.userAgent;
+          if(pendingHeaders.origin) current.origin = pendingHeaders.origin;
+          if(pendingDrm.type) current.drmType = pendingDrm.type;
+          if(pendingDrm.licenseUrl) current.drmLicenseUrl = pendingDrm.licenseUrl;
+          pendingHeaders = {};
+          pendingDrm = {};
         } else if(upper.indexOf('#EXTVLCOPT') === 0){
           applyVlcOpt(line);
         } else if(upper.indexOf('#EXTHTTP') === 0){
@@ -577,6 +625,17 @@
         continue;
       }
       if(!current){
+        var hasPending = pendingHeaders.referer || pendingHeaders.userAgent || pendingHeaders.origin || pendingDrm.type || pendingDrm.licenseUrl;
+        if(!hasPending){
+          // URL "yatim" tanpa EXTINF dan tanpa header/DRM apa pun tertunda
+          // — biasanya cuma alamat cadangan/duplikat yang memang tidak
+          // dipakai (mis. baris kedua setelah satu EXTINF yang sudah
+          // "dihabiskan" oleh baris pertama). Lewati saja supaya tidak
+          // muncul sebagai channel palsu bernama generik "Channel" yang
+          // kehilangan semua info Referer/DRM-nya — inilah sumber channel
+          // "kosong"/aneh yang suka muncul di kartu info channel.
+          continue;
+        }
         current = { name: 'Channel', logo:'', group:'', number:null };
       }
       current.url = line;
@@ -590,7 +649,7 @@
       pendingHeaders = {};
       pendingDrm = {};
     }
-    return assignNumbers(channels);
+    return { channels: assignNumbers(channels), epgUrls: epgUrls };
   }
 
   function assignNumbers(raw){
@@ -647,10 +706,11 @@
 
   /* ---------------- Storage ---------------- */
 
-  function persistPlaylist(url, channels){
+  function persistPlaylist(url, channels, epgUrls){
     try{
       localStorage.setItem(LS_URL, url);
       localStorage.setItem(LS_CHANNELS, JSON.stringify(channels));
+      localStorage.setItem(LS_EPG_URLS, JSON.stringify(epgUrls || []));
     }catch(e){ /* storage unavailable, ignore */ }
   }
   function loadPersisted(){
@@ -660,13 +720,16 @@
       if(!url || !raw) return null;
       var channels = JSON.parse(raw);
       if(!Array.isArray(channels) || channels.length === 0) return null;
-      return { url: url, channels: channels };
+      var epgUrls = [];
+      try{ epgUrls = JSON.parse(localStorage.getItem(LS_EPG_URLS) || '[]'); }catch(e){}
+      return { url: url, channels: channels, epgUrls: epgUrls };
     }catch(e){ return null; }
   }
   function clearPersisted(){
     try{
       localStorage.removeItem(LS_URL);
       localStorage.removeItem(LS_CHANNELS);
+      localStorage.removeItem(LS_EPG_URLS);
       localStorage.removeItem(LS_LAST);
       localStorage.removeItem(LS_PROXY);
       localStorage.removeItem(LS_PROXY_SNAPSHOT);
@@ -759,11 +822,12 @@
     }
     setLoadBtnBusy(true);
     fetchPlaylist(url).then(function(text){
-      var channels = parseM3U(text);
+      var parsed = parseM3U(text);
+      var channels = parsed.channels;
       if(channels.length === 0){
         throw new Error('Playlist tidak berisi channel yang valid (format M3U tidak dikenali).');
       }
-      persistPlaylist(url, channels);
+      persistPlaylist(url, channels, parsed.epgUrls);
       try{
         if(proxyUrl) localStorage.setItem(LS_PROXY, proxyUrl);
         else localStorage.removeItem(LS_PROXY);
@@ -775,6 +839,7 @@
       startProxyWarmup();
       state.channels = channels;
       state.hasChannels = true;
+      loadEpg(parsed.epgUrls);
       els.modalOverlay.hidden = true;
       var lastNum = parseInt(localStorage.getItem(LS_LAST) || '', 10);
       var idx = channels.findIndex(function(c){ return c.number === lastNum; });
@@ -812,6 +877,131 @@
 
   /* ---------------- OSD ---------------- */
 
+  /* ---------------- EPG (jadwal tayang sederhana) ---------------- */
+  // Desain sengaja dibuat seringan mungkin:
+  // - Cuma ambil "sedang tayang apa SEKARANG", bukan grid jadwal penuh.
+  // - Parsing pakai regex, BUKAN DOMParser/XML parser penuh (jauh lebih
+  //   hemat memori & CPU untuk file XMLTV yang bisa berukuran puluhan MB).
+  // - Cuma menyimpan programme milik channel yang BENAR-BENAR ada di
+  //   playlist ini (disaring saat parsing), bukan seluruh isi file EPG.
+  // - Coba beberapa URL EPG BERURUTAN (bukan sekaligus paralel) sampai
+  //   satu berhasil — berhenti begitu ada yang cocok, tidak boros bandwidth.
+  // - Gagal (CORS/network/format tak dikenal) = diam-diam tidak
+  //   menampilkan apa pun, bukan error yang mengganggu nonton.
+
+  function decodeXmlEntities(s){
+    return s.replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>')
+      .replace(/&quot;/g,'"').replace(/&#39;/g,"'")
+      .replace(/&#(\d+);/g, function(_, n){ return String.fromCharCode(parseInt(n,10)); });
+  }
+
+  function parseXmltvDate(s){
+    if(!s) return null;
+    var m = s.match(/^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})\s*(?:([+-]\d{2})(\d{2}))?/);
+    if(!m) return null;
+    var iso = m[1]+'-'+m[2]+'-'+m[3]+'T'+m[4]+':'+m[5]+':'+m[6];
+    iso += m[7] ? (m[7]+':'+m[8]) : 'Z';
+    var d = new Date(iso);
+    return isNaN(d.getTime()) ? null : d;
+  }
+
+  function parseXmltvProgrammes(xmlText, wantedTvgIds){
+    var index = {};
+    var re = /<programme\b([^>]*)>([\s\S]*?)<\/programme>/gi;
+    var m;
+    var count = 0;
+    while((m = re.exec(xmlText))){
+      var attrsStr = m[1], body = m[2];
+      var chMatch = attrsStr.match(/channel="([^"]*)"/i);
+      if(!chMatch || !wantedTvgIds[chMatch[1]]) continue; // bukan channel kita, lewati (hemat memori)
+      var startMatch = attrsStr.match(/start="([^"]*)"/i);
+      var stopMatch = attrsStr.match(/stop="([^"]*)"/i);
+      if(!startMatch || !stopMatch) continue;
+      var start = parseXmltvDate(startMatch[1]);
+      var stop = parseXmltvDate(stopMatch[1]);
+      if(!start || !stop) continue;
+      var titleMatch = body.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+      var title = titleMatch ? decodeXmlEntities(titleMatch[1].trim()) : '';
+      if(!title) continue;
+      var chId = chMatch[1];
+      if(!index[chId]) index[chId] = [];
+      index[chId].push({ start: start, end: stop, title: title });
+      count++;
+    }
+    Object.keys(index).forEach(function(k){
+      index[k].sort(function(a,b){ return a.start - b.start; });
+    });
+    return { index: index, count: count };
+  }
+
+  async function fetchEpgText(url){
+    var res = await fetch(url, { cache: 'no-store' });
+    if(!res.ok) throw new Error('HTTP ' + res.status);
+    if(/\.gz(\?|$)/i.test(url) && window.DecompressionStream){
+      var stream = res.body.pipeThrough(new DecompressionStream('gzip'));
+      return await new Response(stream).text();
+    }
+    return await res.text();
+  }
+
+  // Token sesi khusus EPG: kalau playlist diganti sebelum fetch EPG lama
+  // selesai, hasil basi diabaikan (pola sama seperti playToken untuk video).
+  function loadEpg(epgUrls){
+    state.epgIndex = null;
+    var myToken = ++state.epgToken;
+    if(!epgUrls || epgUrls.length === 0) return;
+
+    var wantedTvgIds = {};
+    var any = false;
+    state.channels.forEach(function(c){
+      if(c.tvgId){ wantedTvgIds[c.tvgId] = true; any = true; }
+    });
+    if(!any) return; // playlist tidak punya tvg-id sama sekali, EPG tidak akan pernah cocok
+
+    var sources = epgUrls.slice(0, 4); // batasi maksimal 4 percobaan, tetap ringan
+    var i = 0;
+    function tryNext(){
+      if(i >= sources.length || myToken !== state.epgToken) return;
+      var url = sources[i++];
+      fetchEpgText(url).then(function(text){
+        if(myToken !== state.epgToken) return;
+        var result = parseXmltvProgrammes(text, wantedTvgIds);
+        if(result.count > 0){
+          state.epgIndex = result.index;
+          // Kalau OSD sedang tampil, refresh supaya info EPG langsung muncul.
+          var ch = state.channels[state.currentIndex];
+          if(ch && els.osd.classList.contains('show')) refreshOsdEpg(ch);
+        } else {
+          tryNext(); // tidak ada programme yang cocok, coba sumber berikutnya
+        }
+      }).catch(function(){
+        tryNext(); // sumber ini gagal (CORS/network/dll), coba sumber berikutnya
+      });
+    }
+    tryNext();
+  }
+
+  function getNowPlaying(tvgId){
+    if(!state.epgIndex || !tvgId) return null;
+    var list = state.epgIndex[tvgId];
+    if(!list || list.length === 0) return null;
+    var now = new Date();
+    for(var i=0;i<list.length;i++){
+      if(now >= list[i].start && now < list[i].end) return list[i];
+    }
+    return null;
+  }
+
+  function refreshOsdEpg(ch){
+    var programme = ch && ch.tvgId ? getNowPlaying(ch.tvgId) : null;
+    if(programme){
+      els.osdEpg.innerHTML = '<b>Sekarang:</b> ' + programme.title.replace(/</g,'&lt;');
+      els.osdEpg.hidden = false;
+    } else {
+      els.osdEpg.hidden = true;
+    }
+  }
+
   function showOSD(ch){
     els.osdNumber.textContent = ch.number;
     els.osdName.textContent = ch.name;
@@ -821,6 +1011,7 @@
     } else {
       els.osdGroup.hidden = true;
     }
+    refreshOsdEpg(ch);
     if(ch.logo){
       els.osdLogo.innerHTML = '<img src="' + ch.logo.replace(/"/g,'&quot;') + '" alt="">';
     } else {
@@ -1508,6 +1699,7 @@
       state.channels = persisted.channels;
       state.hasChannels = true;
       els.modalOverlay.hidden = true;
+      loadEpg(persisted.epgUrls);
       var lastNum = parseInt(localStorage.getItem(LS_LAST) || '', 10);
       var idx = state.channels.findIndex(function(c){ return c.number === lastNum; });
       startPlayback(idx >= 0 ? idx : 0);
