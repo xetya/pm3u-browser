@@ -87,6 +87,28 @@
     margin-top:6px; font-family:var(--font-body); font-size:14px;
     color:var(--text-2); text-transform:uppercase; letter-spacing:.08em;
   }
+  /* Judul lagu/acara yang sedang diputar radio (kalau server radionya
+     mengizinkan metadata ICY dibaca browser) -- tampil dengan efek
+     berjalan (marquee) hanya kalau teksnya lebih panjang dari lebar
+     kotaknya; kalau muat, ditampilkan diam saja tanpa animasi. */
+  .radio-cover-now{
+    margin-top:14px; max-width:min(420px, 70vw);
+    overflow:hidden; white-space:nowrap; position:relative;
+  }
+  .radio-cover-now[hidden]{display:none;}
+  .radio-cover-now-track{
+    display:inline-block;
+    font-family:var(--font-mono); font-size:12.5px; color:var(--accent);
+    letter-spacing:.03em;
+  }
+  .radio-cover-now.scrolling .radio-cover-now-track{
+    padding-left:100%;
+    animation: radioMarquee var(--marquee-duration, 14s) linear infinite;
+  }
+  @keyframes radioMarquee{
+    from{ transform:translateX(0); }
+    to{ transform:translateX(-100%); }
+  }
 
   /* ---------- Boot / Settings modal ---------- */
   .overlay{
@@ -323,6 +345,7 @@
     <div class="radio-cover-text">
       <div class="radio-cover-name" id="radioCoverName">—</div>
       <div class="radio-cover-group" id="radioCoverGroup">—</div>
+      <div class="radio-cover-now" id="radioCoverNow" hidden><span class="radio-cover-now-track" id="radioCoverNowTrack"></span></div>
     </div>
   </div>
   <div class="player-empty" id="playerEmpty" hidden>
@@ -508,6 +531,8 @@
     radioCoverFallback: document.getElementById('radioCoverFallback'),
     radioCoverName: document.getElementById('radioCoverName'),
     radioCoverGroup: document.getElementById('radioCoverGroup'),
+    radioCoverNow: document.getElementById('radioCoverNow'),
+    radioCoverNowTrack: document.getElementById('radioCoverNowTrack'),
     toast: document.getElementById('toast'),
     toastText: document.getElementById('toastText'),
     autoplayGate: document.getElementById('autoplayGate'),
@@ -1156,6 +1181,101 @@
       els.radioCoverBg.style.backgroundImage = '';
     }
   }
+
+  /* ---------------- Judul lagu/acara radio (metadata ICY) ---------------- */
+  // Nama lagu/acara yang lagi diputar radio TIDAK datang dari playlist —
+  // itu tersisip di dalam ALIRAN AUDIO itu sendiri (protokol ICY/Shoutcast),
+  // dan browser cuma bisa membacanya kalau SERVER radionya mengizinkan
+  // (lewat CORS) klien membaca header "icy-metaint" & byte metadata di
+  // dalam stream. Banyak server radio publik TIDAK mengizinkan ini, jadi
+  // ini sengaja dibuat "usaha terbaik": kalau berhasil, judulnya tampil
+  // dengan animasi berjalan (marquee); kalau tidak (server menolak/tidak
+  // mendukung), baris ini otomatis tetap tersembunyi, bukan error.
+  //
+  // Catatan: ini membuka KONEKSI KEDUA yang terpisah ke stream yang sama
+  // (video/audio yang diputar tetap lewat <video> seperti biasa) khusus
+  // untuk membaca metadata-nya saja, jadi ada sedikit tambahan pemakaian
+  // bandwidth selama channel radio itu aktif.
+  var icyAbort = null;
+  function setRadioNowPlaying(text){
+    var box = els.radioCoverNow, track = els.radioCoverNowTrack;
+    text = (text || '').trim();
+    if(!text){
+      box.hidden = true;
+      box.classList.remove('scrolling');
+      track.textContent = '';
+      return;
+    }
+    track.textContent = text;
+    box.hidden = false;
+    box.classList.remove('scrolling');
+    requestAnimationFrame(function(){
+      if(track.scrollWidth > box.clientWidth + 4){
+        var duration = Math.max(8, Math.round(track.scrollWidth / 40));
+        box.style.setProperty('--marquee-duration', duration + 's');
+        box.classList.add('scrolling');
+      }
+    });
+  }
+  function stopIcyMetadata(){
+    if(icyAbort){ try{ icyAbort.abort(); }catch(e){} icyAbort = null; }
+    setRadioNowPlaying('');
+  }
+  function startIcyMetadata(ch, token, streamUrl){
+    stopIcyMetadata();
+    if(!isRadioChannel(ch)) return;
+    if(!window.fetch || !window.ReadableStream || !window.AbortController) return;
+    var controller = new AbortController();
+    icyAbort = controller;
+    fetch(streamUrl, { headers: { 'Icy-MetaData': '1' }, signal: controller.signal, mode: 'cors' })
+      .then(function(res){
+        if(isStale(token) || controller.signal.aborted || !res.body) return;
+        var metaInt = parseInt(res.headers.get('icy-metaint') || '', 10);
+        if(!metaInt) return; // server tidak expose metadata ICY-nya -- diamkan saja
+        var reader = res.body.getReader();
+        var bytesUntilMeta = metaInt;
+        var readingMetaLen = -1; // -1 = masih di area audio biasa
+        var metaBuf = [];
+        var metaLen = 0;
+        function pump(){
+          if(isStale(token) || controller.signal.aborted) return;
+          reader.read().then(function(step){
+            if(step.done || isStale(token) || controller.signal.aborted) return;
+            var chunk = step.value, i = 0;
+            while(i < chunk.length){
+              if(readingMetaLen < 0){
+                var take = Math.min(bytesUntilMeta, chunk.length - i);
+                i += take; bytesUntilMeta -= take;
+                if(bytesUntilMeta === 0 && i < chunk.length){
+                  var lenByte = chunk[i]; i++;
+                  readingMetaLen = lenByte * 16;
+                  metaBuf = []; metaLen = 0;
+                  if(readingMetaLen === 0){ readingMetaLen = -1; bytesUntilMeta = metaInt; }
+                }
+              } else {
+                var need = readingMetaLen - metaLen;
+                var take2 = Math.min(need, chunk.length - i);
+                for(var k = 0; k < take2; k++){ metaBuf.push(chunk[i + k]); }
+                i += take2; metaLen += take2;
+                if(metaLen >= readingMetaLen){
+                  try{
+                    var text = new TextDecoder('utf-8').decode(new Uint8Array(metaBuf));
+                    var m = /StreamTitle=['"]([^'"]*)['"]/.exec(text);
+                    if(m && !isStale(token)) setRadioNowPlaying(m[1]);
+                  }catch(e){}
+                  readingMetaLen = -1;
+                  bytesUntilMeta = metaInt;
+                }
+              }
+            }
+            pump();
+          }).catch(function(){ /* koneksi metadata putus -- diamkan, cover radio tetap tampil normal tanpa judul */ });
+        }
+        pump();
+      })
+      .catch(function(){ /* server menolak/CORS -- diamkan, ini memang usaha terbaik saja */ });
+  }
+
   function showOSD(ch){
     updateRadioCover(ch);
     els.osdNumber.textContent = ch.number;
@@ -1804,6 +1924,9 @@
     // jadi cara paling andal (persis seperti aplikasi IPTV berbasis proxy
     // lainnya) adalah selalu menitipkan permintaan lewat proxy begitu tersedia.
     var playUrl = proxyBase ? buildProxiedUrl(ch, proxyBase) : ch.url;
+
+    stopIcyMetadata();
+    if(isRadioChannel(ch)) startIcyMetadata(ch, token, playUrl);
 
     setupPlayer(playUrl, ext, token, ch, function(){
       if(isStale(token)) return;
