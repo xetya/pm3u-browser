@@ -33,6 +33,10 @@
     font-family:var(--font-body); color:var(--text-1);
     -webkit-tap-highlight-color:transparent; user-select:none;
   }
+  /* Kursor mouse (termasuk kursor virtual yang digerakkan D-pad di
+     browser Smart TV/Android TV) disembunyikan otomatis saat tidak ada
+     pergerakan — lihat logic "Auto-hide kursor" di bagian script. */
+  html.cursor-hidden, html.cursor-hidden *{ cursor:none !important; }
   #stage{position:fixed; inset:0; background:#000;}
   video{width:100%; height:100%; object-fit:contain; background:#000; display:block;}
 
@@ -443,6 +447,7 @@
     playToken: 0,
     osdTimer: null,
     cornerTimer: null,
+    cursorTimer: null,
     hasChannels: false,
     retryTimer: null,
     retryDelay: 0
@@ -874,6 +879,28 @@
   }
   document.addEventListener('mousemove', pokeCornerBtn);
   document.addEventListener('touchstart', pokeCornerBtn, {passive:true});
+
+  /* ---------------- Auto-hide kursor mouse ---------------- */
+  // Di banyak browser Smart TV/Android TV, D-pad atas/bawah/kiri/kanan
+  // menggerakkan sebuah kursor mouse virtual di layar, dan itu memicu
+  // event 'mousemove' sungguhan seperti mouse betulan. Jadi cara paling
+  // pas untuk deteksi "ada pergerakan D-pad" ya lewat event itu sendiri.
+  // Kursor disembunyikan otomatis kalau diam beberapa detik, dan hanya
+  // muncul lagi kalau ada 'mousemove' asli. Tombol PageUp/PageDown
+  // (ganti channel) dan tombol angka (pilih channel) TIDAK memicu
+  // 'mousemove' sama sekali (itu murni event keydown), jadi otomatis
+  // tidak akan memunculkan kursor lagi -- sesuai yang diinginkan.
+  var CURSOR_HIDE_MS = 3000;
+  function showCursor(){
+    document.documentElement.classList.remove('cursor-hidden');
+    clearTimeout(state.cursorTimer);
+    state.cursorTimer = setTimeout(function(){
+      document.documentElement.classList.add('cursor-hidden');
+    }, CURSOR_HIDE_MS);
+  }
+  document.addEventListener('mousemove', showCursor);
+  document.addEventListener('pointermove', showCursor);
+  showCursor(); // aktifkan timer dari awal, supaya kursor hilang sendiri kalau memang tak digerakkan
 
   /* ---------------- OSD ---------------- */
 
