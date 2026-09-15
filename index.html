@@ -43,6 +43,22 @@
   html.cursor-hidden, html.cursor-hidden *{ cursor:none !important; }
   #stage{position:fixed; inset:0; background:#000;}
   video{width:100%; height:100%; object-fit:contain; background:#000; display:block;}
+  #ytFrame{
+    position:fixed; inset:0; width:100%; height:100%; border:0; z-index:1; background:#000;
+  }
+  #ytFrame[hidden]{display:none;}
+  /* Lapisan transparan permanen di atas iframe YouTube: menangkap klik
+     pertama untuk mengaktifkan suara (sama seperti channel lain), dan
+     SENGAJA tidak pernah dilepas -- kalau klik langsung tembus ke player
+     YouTube di baliknya, fokus keyboard bisa pindah ke dalam iframe dan
+     tombol channel naik/turun/angka di remote jadi tidak lagi kebaca oleh
+     halaman ini. Konsekuensinya: kontrol asli YouTube (play/pause/seek)
+     sengaja tidak bisa diklik -- channel tetap dikendalikan lewat remote/
+     keyboard aplikasi ini seperti channel lainnya. */
+  #ytClickCatcher{
+    position:fixed; inset:0; z-index:2; background:transparent; cursor:pointer;
+  }
+  #ytClickCatcher[hidden]{display:none;}
 
   /* ---------- Tampilan "cover" untuk channel RADIO ---------- */
   /* Dipakai menggantikan layar video hitam polos saat channel yang
@@ -336,6 +352,9 @@
 
 <div id="stage">
   <video id="video" playsinline muted></video>
+  <iframe id="ytFrame" hidden title="YouTube player" frameborder="0"
+    allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe>
+  <div id="ytClickCatcher" hidden></div>
   <div class="radio-cover" id="radioCover" hidden>
     <div class="radio-cover-bg" id="radioCoverBg"></div>
     <div class="radio-cover-art">
@@ -525,6 +544,8 @@
   var els = {
     video: document.getElementById('video'),
     playerEmpty: document.getElementById('playerEmpty'),
+    ytFrame: document.getElementById('ytFrame'),
+    ytClickCatcher: document.getElementById('ytClickCatcher'),
     radioCover: document.getElementById('radioCover'),
     radioCoverBg: document.getElementById('radioCoverBg'),
     radioCoverImg: document.getElementById('radioCoverImg'),
@@ -574,6 +595,8 @@
     osdTimer: null,
     cornerTimer: null,
     cursorTimer: null,
+    ytActive: false,
+    ytMuted: true,
     hasChannels: false,
     retryTimer: null,
     retryDelay: 0
@@ -1154,6 +1177,82 @@
       els.osdEpg.hidden = true;
     }
   }
+
+  /* ---------------- Channel YouTube (video/live) ---------------- */
+  // Diputar lewat iframe embed resmi YouTube (bukan mengambil paksa link
+  // stream mentahnya) -- ini satu-satunya cara memutar YouTube di halaman
+  // sendiri tanpa melanggar aturan layanan mereka, dan tetap "di dalam"
+  // web ini (tidak pindah/terlempar ke tab/situs youtube.com).
+  function parseYoutubeUrl(url){
+    if(!url) return null;
+    var m = /(?:youtu\.be\/|youtube(?:-nocookie)?\.com\/(?:watch\?(?:[^#]*&)?v=|embed\/|shorts\/|live\/))([A-Za-z0-9_-]{6,})/i.exec(url);
+    if(m) return { kind:'video', id:m[1] };
+    // Live sebuah kanal lewat ID kanal (UCxxxx) -- YouTube punya endpoint
+    // embed khusus untuk ini yang otomatis mengikuti siaran live kanal
+    // tsb, apa pun video live-nya saat ini.
+    m = /youtube(?:-nocookie)?\.com\/channel\/(UC[A-Za-z0-9_-]{10,})/i.exec(url);
+    if(m) return { kind:'channel', id:m[1] };
+    // Kanal lewat @handle/nama kustom/username lama TIDAK bisa diterjemahkan
+    // ke ID kanal tanpa panggilan API YouTube (butuh API key, di luar
+    // cakupan aplikasi statis ini) -- sengaja tidak didukung, channel akan
+    // gagal seperti biasa (bukan macet diam).
+    return null;
+  }
+  function buildYoutubeEmbedUrl(yt){
+    var origin = encodeURIComponent(location.origin);
+    var common = 'autoplay=1&mute=1&playsinline=1&rel=0&modestbranding=1&enablejsapi=1&origin=' + origin;
+    if(yt.kind === 'channel'){
+      return 'https://www.youtube.com/embed/live_stream?channel=' + yt.id + '&' + common;
+    }
+    return 'https://www.youtube.com/embed/' + yt.id + '?' + common;
+  }
+  function postYoutubeCommand(func, args){
+    if(!els.ytFrame || !els.ytFrame.contentWindow) return;
+    try{
+      els.ytFrame.contentWindow.postMessage(JSON.stringify({ event:'command', func:func, args: args || [] }), '*');
+    }catch(e){}
+  }
+  function stopYoutube(){
+    if(!state.ytActive) return;
+    state.ytActive = false;
+    state.ytMuted = true;
+    els.ytFrame.hidden = true;
+    els.ytFrame.src = 'about:blank';
+    els.ytClickCatcher.hidden = true;
+  }
+  function startYoutube(yt, token){
+    els.radioCover.hidden = true;
+    els.playerEmpty.hidden = true;
+    stopIcyMetadata();
+    toast('Memuat YouTube…', {pulse:true});
+    state.ytActive = true;
+    state.ytMuted = true;
+    els.ytFrame.src = buildYoutubeEmbedUrl(yt);
+    els.ytFrame.hidden = false;
+    els.ytClickCatcher.hidden = false;
+    showMutedBadge();
+  }
+  // YouTube (lewat enablejsapi=1) mengirim status pemutarannya balik ke
+  // halaman ini lewat postMessage -- dipakai sekadar untuk menyembunyikan
+  // toast "Memuat…" begitu benar-benar mulai main, dan mendeteksi kalau
+  // video/live-nya error (ID salah, video privat/dihapus, live sudah
+  // berakhir, dll) supaya channel itu jatuh ke alur gagal yang sama
+  // seperti channel lain, bukan diam menggantung selamanya.
+  window.addEventListener('message', function(event){
+    if(!state.ytActive) return;
+    if(!/^https:\/\/(www\.)?youtube(-nocookie)?\.com$/.test(event.origin)) return;
+    var data;
+    try{ data = JSON.parse(event.data); }catch(e){ return; }
+    if(!data || !data.event) return;
+    if(data.event === 'onStateChange' && data.info === 1){
+      hideToast();
+    } else if(data.event === 'onError'){
+      var idx = state.currentIndex, tok = state.playToken;
+      stopYoutube();
+      finalPlaybackError();
+      scheduleAutoRetry(idx, tok);
+    }
+  }, false);
 
   function isRadioChannel(ch){
     // Ditandai lewat group-title, bukan ekstensi URL, karena stream radio
@@ -1830,7 +1929,7 @@
   var mutedBadgeTimer = null;
 
   function showMutedBadge(){
-    if(!els.video.muted) return;
+    if(state.ytActive ? !state.ytMuted : !els.video.muted) return;
     mutedBadgeEl.hidden = false;
     mutedBadgeEl.classList.add('visible');
     clearTimeout(mutedBadgeTimer);
@@ -1843,6 +1942,15 @@
     setTimeout(function(){ mutedBadgeEl.hidden = true; }, 300);
   }
   function unmute(){
+    if(state.ytActive){
+      if(state.ytMuted){
+        postYoutubeCommand('unMute');
+        postYoutubeCommand('setVolume', [100]);
+        state.ytMuted = false;
+        hideMutedBadge();
+      }
+      return;
+    }
     if(els.video.muted){
       els.video.muted = false;
       hideMutedBadge();
@@ -1851,6 +1959,7 @@
   mutedBadgeEl.addEventListener('click', unmute);
   els.video.addEventListener('click', unmute);
   els.radioCover.addEventListener('click', unmute);
+  els.ytClickCatcher.addEventListener('click', unmute);
 
   // Selalu mulai dalam kondisi bisu (dijamin diizinkan semua browser tanpa
   // interaksi apa pun), lalu segera coba aktifkan suara secara otomatis.
@@ -1916,6 +2025,16 @@
     showOSD(ch);
 
     var token = ++state.playToken;
+
+    var yt = parseYoutubeUrl(ch.url);
+    if(yt){
+      cleanupHls();
+      stopIcyMetadata();
+      startYoutube(yt, token);
+      return;
+    }
+    stopYoutube();
+
     var ext = getExt(ch.url);
     var proxyBase = getProxyBase();
     // Kalau proxy sudah dikonfigurasi, SEMUA channel lewat proxy itu — bukan
