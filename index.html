@@ -2101,6 +2101,26 @@
     if(k === 'PageDown' || k === 'ArrowDown' || k === 'ChannelDown' || e.keyCode === 34){
       e.preventDefault(); tryEnterFullscreen(); prevChannel(); return;
     }
+    // Remote Smart TV VIDAA: kode tombol channel up/down non-standar
+    // (bukan PageUp/PageDown biasa) -- 427/428 dipakai VIDAA, 33/34
+    // (sudah tercakup di atas) dipakai varian Titan/legacy-nya.
+    if(e.keyCode === 427){
+      e.preventDefault(); tryEnterFullscreen(); nextChannel(); return;
+    }
+    if(e.keyCode === 428){
+      e.preventDefault(); tryEnterFullscreen(); prevChannel(); return;
+    }
+    // Remote Smart TV VIDAA: tombol "kiri"/"kanan" di remote fisiknya
+    // sebenarnya terpetakan sebagai tombol PAGE (channel sebelumnya/
+    // berikutnya), bukan navigasi fokus kiri/kanan biasa -- browsernya
+    // sendiri mengirim event ini sebagai ArrowLeft/ArrowRight. Kiri =
+    // channel sebelumnya, kanan = channel berikutnya.
+    if(k === 'ArrowLeft'){
+      e.preventDefault(); tryEnterFullscreen(); prevChannel(); return;
+    }
+    if(k === 'ArrowRight'){
+      e.preventDefault(); tryEnterFullscreen(); nextChannel(); return;
+    }
     if(/^[0-9]$/.test(k)){
       tryEnterFullscreen(); handleDigit(k); return;
     }
