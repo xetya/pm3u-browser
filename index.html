@@ -44,6 +44,50 @@
   #stage{position:fixed; inset:0; background:#000;}
   video{width:100%; height:100%; object-fit:contain; background:#000; display:block;}
 
+  /* ---------- Tampilan "cover" untuk channel RADIO ---------- */
+  /* Dipakai menggantikan layar video hitam polos saat channel yang
+     sedang diputar adalah radio (audio-only): mirip tampilan now-playing
+     ala Apple Music/Spotify — logo radio jadi cover art, background blur
+     dari logo yang sama, lalu nama radio + nama grupnya di bawah cover. */
+  .radio-cover{
+    position:fixed; inset:0; z-index:2;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:22px; padding:24px; text-align:center;
+    background:var(--void);
+  }
+  .radio-cover[hidden]{display:none;}
+  .radio-cover-bg{
+    position:absolute; inset:-10%;
+    background-size:cover; background-position:center;
+    filter:blur(60px) saturate(160%) brightness(.55);
+    transform:scale(1.15);
+  }
+  .radio-cover-bg::after{
+    content:''; position:absolute; inset:0;
+    background:radial-gradient(circle at 50% 40%, rgba(0,0,0,.15), rgba(5,6,8,.75) 78%);
+  }
+  .radio-cover-art{
+    position:relative; z-index:1;
+    width:min(280px, 56vw); height:min(280px, 56vw);
+    border-radius:20px; overflow:hidden;
+    background:var(--panel);
+    box-shadow:0 24px 60px rgba(0,0,0,.55), 0 0 0 1px var(--line);
+    display:flex; align-items:center; justify-content:center;
+  }
+  .radio-cover-art img{ width:100%; height:100%; object-fit:cover; display:block; }
+  .radio-cover-fallback{
+    font-family:var(--font-display); font-size:64px; color:var(--text-2);
+  }
+  .radio-cover-text{ position:relative; z-index:1; max-width:640px; }
+  .radio-cover-name{
+    font-family:var(--font-display); font-weight:600;
+    font-size:clamp(20px, 4vw, 30px); color:var(--text-1); letter-spacing:.01em;
+  }
+  .radio-cover-group{
+    margin-top:6px; font-family:var(--font-body); font-size:14px;
+    color:var(--text-2); text-transform:uppercase; letter-spacing:.08em;
+  }
+
   /* ---------- Boot / Settings modal ---------- */
   .overlay{
     position:fixed; inset:0; background:rgba(5,6,8,.72);
@@ -270,6 +314,17 @@
 
 <div id="stage">
   <video id="video" playsinline muted></video>
+  <div class="radio-cover" id="radioCover" hidden>
+    <div class="radio-cover-bg" id="radioCoverBg"></div>
+    <div class="radio-cover-art">
+      <img id="radioCoverImg" alt="" hidden>
+      <span class="radio-cover-fallback" id="radioCoverFallback">♪</span>
+    </div>
+    <div class="radio-cover-text">
+      <div class="radio-cover-name" id="radioCoverName">—</div>
+      <div class="radio-cover-group" id="radioCoverGroup">—</div>
+    </div>
+  </div>
   <div class="player-empty" id="playerEmpty" hidden>
     <div style="font-family:var(--font-display); font-size:15px; color:var(--text-2); letter-spacing:.02em;">TIDAK ADA SINYAL</div>
     <div>Menunggu channel dipilih</div>
@@ -447,6 +502,12 @@
   var els = {
     video: document.getElementById('video'),
     playerEmpty: document.getElementById('playerEmpty'),
+    radioCover: document.getElementById('radioCover'),
+    radioCoverBg: document.getElementById('radioCoverBg'),
+    radioCoverImg: document.getElementById('radioCoverImg'),
+    radioCoverFallback: document.getElementById('radioCoverFallback'),
+    radioCoverName: document.getElementById('radioCoverName'),
+    radioCoverGroup: document.getElementById('radioCoverGroup'),
     toast: document.getElementById('toast'),
     toastText: document.getElementById('toastText'),
     autoplayGate: document.getElementById('autoplayGate'),
@@ -1069,7 +1130,34 @@
     }
   }
 
+  function isRadioChannel(ch){
+    // Ditandai lewat group-title, bukan ekstensi URL, karena stream radio
+    // (mp3/aac/radiojar/dll) sering tidak punya ekstensi jelas di URL-nya.
+    // Cukup deteksi kata "radio" di nama grupnya (playlist ini pakai
+    // "🟠RADIO", tapi emoji/simbol di depan tidak masalah).
+    return !!(ch && ch.group && /radio/i.test(ch.group));
+  }
+  function updateRadioCover(ch){
+    var radio = isRadioChannel(ch);
+    els.radioCover.hidden = !radio;
+    if(!radio) return;
+    els.radioCoverName.textContent = ch.name || 'Radio';
+    els.radioCoverGroup.textContent = ch.group || '';
+    if(ch.logo){
+      els.radioCoverImg.src = ch.logo;
+      els.radioCoverImg.hidden = false;
+      els.radioCoverFallback.hidden = true;
+      els.radioCoverBg.style.backgroundImage = 'url("' + ch.logo.replace(/"/g,'&quot;') + '")';
+    } else {
+      els.radioCoverImg.hidden = true;
+      els.radioCoverImg.removeAttribute('src');
+      els.radioCoverFallback.hidden = false;
+      els.radioCoverFallback.textContent = (ch.name || '?').trim().charAt(0).toUpperCase() || '♪';
+      els.radioCoverBg.style.backgroundImage = '';
+    }
+  }
   function showOSD(ch){
+    updateRadioCover(ch);
     els.osdNumber.textContent = ch.number;
     els.osdName.textContent = ch.name;
     if(ch.group){
