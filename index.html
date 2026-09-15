@@ -1664,6 +1664,20 @@
     var ext = extHint || getExt(url);
     var giveUp = onAllFail || finalPlaybackError;
 
+    // Channel RADIO (audio-only) hampir selalu format mentah (mp3/aac/ogg,
+    // seringnya malah tanpa ekstensi sama sekali di URL-nya) -- BUKAN
+    // container video. hls.js & mpegts.js dibuat untuk parsing manifest
+    // HLS / MPEG-TS / FLV; kalau stream radio dipaksa lewat situ dulu,
+    // hampir selalu gagal berkali-kali dulu (buang banyak waktu retry)
+    // sebelum akhirnya sampai ke fallback native. Jadi untuk radio,
+    // langsung saja ke <video> native yang bisa memutar audio mentah
+    // langsung lewat decoder bawaan browser -- kecuali memang stream-nya
+    // berupa manifest HLS/DASH (.m3u8/.mpd), yang tetap butuh hls.js.
+    if(isRadioChannel(ch) && ext !== 'm3u8' && ext !== 'mpd'){
+      tryNativeVideo(url, token, giveUp);
+      return;
+    }
+
     if(ext === 'mpd'){
       tryDash(url, token, ch, function(){ tryHls(url, token, function(){ tryNativeVideo(url, token, giveUp); }); });
     } else if(ext === 'flv'){
@@ -1716,6 +1730,7 @@
   }
   mutedBadgeEl.addEventListener('click', unmute);
   els.video.addEventListener('click', unmute);
+  els.radioCover.addEventListener('click', unmute);
 
   // Selalu mulai dalam kondisi bisu (dijamin diizinkan semua browser tanpa
   // interaksi apa pun), lalu segera coba aktifkan suara secara otomatis.
