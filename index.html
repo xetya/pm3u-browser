@@ -264,7 +264,7 @@
     background:radial-gradient(ellipse at center, rgba(255,255,255,.12) 0%, transparent 70%);
     border-radius:50%; animation:tvShadowPulse 3.5s ease-in-out infinite;
   }
-  .loading-text{ margin-top:56px; text-align:center; display:flex; flex-direction:column; gap:6px; }
+  .loading-text{ margin-top:56px; text-align:center; display:flex; flex-direction:column; gap:6px; max-width:min(440px, 82vw); }
   .loading-text-title{ color:var(--text-1); font-family:var(--font-display); font-weight:600; font-size:18px; letter-spacing:.03em; }
   .loading-text-sub{ color:var(--text-2); font-family:var(--font-mono); font-size:13px; letter-spacing:.03em; }
   .loading-text-sub .dots::after{ content:''; animation:tvDotsAnim 1.5s steps(4,end) infinite; }
@@ -276,6 +276,42 @@
   }
   @keyframes tvShadowPulse{ 0%,100%{ opacity:.6; transform:scale(1); } 50%{ opacity:.3; transform:scale(.85); } }
   @keyframes tvDotsAnim{ 0%{content:'';} 25%{content:'.';} 50%{content:'..';} 75%{content:'...';} }
+
+  /* ---------- Varian "error" dari overlay TV di atas ---------- */
+  /* Dipakai untuk menggantikan layar "tidak ada sinyal" / channel gagal
+     diputar -- TV 3D-nya tetap sama persis, cuma layarnya berubah jadi
+     noise statis + tanda silang merah berdenyut, dan LED daya ikut
+     berkedip merah, mengaktifkan class "mode-error" di kontainernya. */
+  .loading-overlay.mode-error .tv-screen{
+    background:radial-gradient(circle, #2a0808 0%, #120303 100%);
+    box-shadow:inset 0 0 15px rgba(239,68,68,.25);
+  }
+  .loading-overlay.mode-error .tv-screen-signal{ display:none; }
+  .tv-static-noise{
+    position:absolute; inset:0; z-index:1; opacity:0; pointer-events:none;
+    background-image:repeating-radial-gradient(circle at 50% 50%, #fff 0, #000 2px, transparent 4px);
+    background-size:8px 8px;
+  }
+  .loading-overlay.mode-error .tv-static-noise{
+    opacity:.15; animation:tvNoiseFlicker .15s infinite alternate;
+  }
+  .tv-error-x{ display:none; position:absolute; inset:0; align-items:center; justify-content:center; z-index:5; color:#ef4444; }
+  .loading-overlay.mode-error .tv-error-x{ display:flex; animation:tvPulseX 2s ease-in-out infinite; }
+  .loading-overlay.mode-error .tv-power-led{
+    background:#ef4444; box-shadow:0 0 8px #ef4444, 0 0 14px rgba(239,68,68,.6);
+    animation:tvBlinkRed 1.8s infinite;
+  }
+  .loading-overlay.mode-error .loading-text-title{ color:#f87171; }
+  @keyframes tvNoiseFlicker{
+    0%{ transform:scale(1) translate(0,0); opacity:.12; }
+    50%{ transform:scale(1.03) translate(-1px,1px); opacity:.2; }
+    100%{ transform:scale(.98) translate(1px,-1px); opacity:.14; }
+  }
+  @keyframes tvPulseX{
+    0%,100%{ transform:scale(1); opacity:.95; filter:drop-shadow(0 0 6px rgba(239,68,68,.8)); }
+    50%{ transform:scale(1.12); opacity:1; filter:drop-shadow(0 0 14px rgba(239,68,68,1)); }
+  }
+  @keyframes tvBlinkRed{ 0%,100%{ opacity:1; } 50%{ opacity:.35; } }
 
   /* ---------- Status toast ---------- */
   .toast{
@@ -454,7 +490,13 @@
           <div class="tv-antenna right"></div>
         </div>
         <div class="tv-face front">
-          <div class="tv-screen"><div class="tv-screen-signal"></div></div>
+          <div class="tv-screen">
+            <div class="tv-static-noise"></div>
+            <div class="tv-screen-signal"></div>
+            <div class="tv-error-x">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 18L18 6M6 6l12 12"/></svg>
+            </div>
+          </div>
           <div class="tv-controls">
             <div class="tv-power-led"></div>
             <div class="tv-speaker-grille"><span></span><span></span></div>
@@ -471,8 +513,8 @@
       <div class="tv-floor-shadow"></div>
     </div>
     <div class="loading-text">
-      <p class="loading-text-title">tunggu sebentar</p>
-      <p class="loading-text-sub">sedang memuat channel<span class="dots"></span></p>
+      <p class="loading-text-title" id="loadingTitle">tunggu sebentar</p>
+      <p class="loading-text-sub" id="loadingSub">sedang memuat channel<span class="dots"></span></p>
     </div>
   </div>
 </div>
@@ -649,6 +691,8 @@
     video: document.getElementById('video'),
     playerEmpty: document.getElementById('playerEmpty'),
     loadingOverlay: document.getElementById('loadingOverlay'),
+    loadingTitle: document.getElementById('loadingTitle'),
+    loadingSub: document.getElementById('loadingSub'),
     ytFrame: document.getElementById('ytFrame'),
     ytClickCatcher: document.getElementById('ytClickCatcher'),
     radioCover: document.getElementById('radioCover'),
@@ -1327,8 +1371,8 @@
   }
   function startYoutube(yt, token){
     els.radioCover.hidden = true;
-    els.playerEmpty.hidden = true;
     stopIcyMetadata();
+    resetLoaderToLoading();
     els.loadingOverlay.hidden = false;
     state.ytActive = true;
     state.ytMuted = true;
@@ -1944,10 +1988,27 @@
     }catch(e){ /* dash.js versi lama mungkin API-nya beda, abaikan diam-diam */ }
   }
 
+  // Menampilkan overlay TV 3D dalam mode "error": layar noise statis +
+  // tanda silang merah berdenyut, menggantikan layar polos "TIDAK ADA
+  // SINYAL" yang lama. Overlay yang sama juga dipakai untuk mode loading
+  // (lihat setupPlayer/startYoutube) -- bedanya cuma class "mode-error"
+  // dan teksnya, jadi tidak ada elemen baru yang ditumpuk-tumpuk.
+  function showLoaderError(title, sub){
+    els.loadingTitle.textContent = title;
+    els.loadingSub.textContent = sub;
+    els.loadingOverlay.classList.add('mode-error');
+    els.loadingOverlay.hidden = false;
+  }
+  function resetLoaderToLoading(){
+    els.loadingOverlay.classList.remove('mode-error');
+    els.loadingTitle.textContent = 'tunggu sebentar';
+    els.loadingSub.innerHTML = 'sedang memuat channel<span class="dots"></span>';
+  }
+
   function finalPlaybackError(){
     els.autoplayGate.hidden = true;
-    els.loadingOverlay.hidden = true;
-    els.playerEmpty.hidden = false;
+    var pesan = 'channel ini tidak dapat diputar (server mungkin membatasi akses lintas domain)';
+    showLoaderError('channel rusak', pesan);
     toast('Channel ini tidak dapat diputar (server mungkin membatasi akses lintas domain)', {error:true, duration:4200});
   }
 
@@ -1977,7 +2038,7 @@
   // coba lagi tanpa menunggu jadwal backoff di atas.
   window.addEventListener('online', function(){
     if(!state.hasChannels) return;
-    if(!els.playerEmpty.hidden){
+    if(els.loadingOverlay.classList.contains('mode-error')){
       if(state.retryTimer){ clearTimeout(state.retryTimer); state.retryTimer = null; }
       state.retryDelay = 0;
       startPlayback(state.currentIndex);
@@ -1986,7 +2047,7 @@
 
   function setupPlayer(url, extHint, token, ch, onAllFail){
     cleanupHls();
-    els.playerEmpty.hidden = true;
+    resetLoaderToLoading();
     els.video.removeAttribute('src');
     els.video.load();
     els.loadingOverlay.hidden = false;
