@@ -227,58 +227,62 @@
   @keyframes blink{ 0%,100%{opacity:1;} 50%{opacity:.25;} }
 
   /* ---------- OSD channel banner ---------- */
+  /* Ukuran dibesarkan menyeluruh (dibanding versi sebelumnya) supaya tetap
+     jelas terbaca dari jarak pandang TV biasa (±3-5 meter atau lebih),
+     tanpa menutupi porsi video yang signifikan — makanya banner tetap di
+     bawah dengan lebar terbatas (max-width), bukan melebar penuh layar. */
   .osd{
     position:fixed; left:0; right:0; bottom:0; z-index:20;
-    padding:22px clamp(16px,4vw,48px) 26px;
+    padding:30px clamp(16px,4vw,56px) 34px;
     background:linear-gradient(0deg, rgba(4,5,6,.92) 0%, rgba(4,5,6,.65) 55%, transparent 100%);
     transform:translateY(100%); transition:transform .38s cubic-bezier(.2,.9,.25,1), opacity .38s;
     opacity:0;
   }
   .osd.show{ transform:translateY(0); opacity:1; }
   .osd-inner{
-    display:flex; align-items:center; gap:20px; max-width:1100px;
-    background:var(--panel-glass); border:1px solid var(--line); border-radius:16px;
-    padding:16px 22px; box-shadow:0 20px 50px rgba(0,0,0,.5);
+    display:flex; align-items:center; gap:28px; max-width:1320px;
+    background:var(--panel-glass); border:1px solid var(--line); border-radius:20px;
+    padding:24px 32px; box-shadow:0 24px 60px rgba(0,0,0,.55);
   }
   .osd-logo{
-    width:58px; height:58px; border-radius:10px; background:#0b0d10; border:1px solid var(--line);
+    width:88px; height:88px; border-radius:14px; background:#0b0d10; border:1px solid var(--line);
     display:flex; align-items:center; justify-content:center; overflow:hidden; flex-shrink:0;
   }
   .osd-logo img{ width:100%; height:100%; object-fit:contain; }
-  .osd-logo-fallback{ font-family:var(--font-display); font-weight:600; font-size:19px; color:var(--accent); }
+  .osd-logo-fallback{ font-family:var(--font-display); font-weight:600; font-size:30px; color:var(--accent); }
   .osd-number{
-    font-family:var(--font-display); font-weight:700; font-size:52px; line-height:1;
-    color:var(--accent); text-shadow:0 0 26px var(--accent-soft), 0 0 2px rgba(255,176,32,.4);
-    min-width:70px; text-align:right; letter-spacing:.01em;
+    font-family:var(--font-display); font-weight:700; font-size:84px; line-height:1;
+    color:var(--accent); text-shadow:0 0 32px var(--accent-soft), 0 0 3px rgba(255,176,32,.4);
+    min-width:112px; text-align:right; letter-spacing:.01em;
   }
-  .osd-divider{ width:1px; align-self:stretch; background:var(--line); margin:2px 4px; }
+  .osd-divider{ width:2px; align-self:stretch; background:var(--line); margin:2px 6px; }
   .osd-info{ flex:1; min-width:0; }
-  .osd-name{ font-family:var(--font-display); font-weight:600; font-size:20px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .osd-meta{ display:flex; align-items:center; gap:8px; margin-top:5px; }
+  .osd-name{ font-family:var(--font-display); font-weight:600; font-size:34px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .osd-meta{ display:flex; align-items:center; gap:12px; margin-top:9px; }
   .osd-epg{
-    margin-top:6px; font-size:12.5px; color:var(--text-2); line-height:1.4;
+    margin-top:10px; font-size:18px; color:var(--text-2); line-height:1.4;
     white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100%;
   }
   .osd-epg b{ color:var(--text-1); font-weight:600; }
   .osd-tag{
-    font-family:var(--font-mono); font-size:10.5px; letter-spacing:.06em; color:var(--text-2);
-    background:rgba(255,255,255,.05); border:1px solid var(--line); padding:3px 8px; border-radius:5px;
-    text-transform:uppercase; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:220px;
+    font-family:var(--font-mono); font-size:14px; letter-spacing:.06em; color:var(--text-2);
+    background:rgba(255,255,255,.05); border:1px solid var(--line); padding:5px 12px; border-radius:7px;
+    text-transform:uppercase; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:280px;
   }
-  .osd-live{ display:flex; align-items:center; gap:5px; font-family:var(--font-mono); font-size:10.5px; color:var(--live); letter-spacing:.06em;}
-  .osd-live::before{ content:''; width:6px; height:6px; border-radius:50%; background:var(--live); animation:blink 1.3s infinite;}
-  .osd-right{ display:flex; flex-direction:column; align-items:flex-end; gap:8px; flex-shrink:0; }
-  .osd-clock{ font-family:var(--font-mono); font-size:13px; color:var(--text-2); letter-spacing:.04em; }
-  .signal-bars{ display:flex; align-items:flex-end; gap:3px; height:16px; }
+  .osd-live{ display:flex; align-items:center; gap:7px; font-family:var(--font-mono); font-size:14px; color:var(--live); letter-spacing:.06em;}
+  .osd-live::before{ content:''; width:8px; height:8px; border-radius:50%; background:var(--live); animation:blink 1.3s infinite;}
+  .osd-right{ display:flex; flex-direction:column; align-items:flex-end; gap:12px; flex-shrink:0; }
+  .osd-clock{ font-family:var(--font-mono); font-size:22px; color:var(--text-2); letter-spacing:.04em; }
+  .signal-bars{ display:flex; align-items:flex-end; gap:5px; height:24px; }
   .signal-bars .bar{
-    width:4px; background:var(--text-3); border-radius:2px; opacity:.35;
+    width:6px; background:var(--text-3); border-radius:3px; opacity:.35;
     animation:none;
   }
-  .signal-bars .bar:nth-child(1){ height:6px; }
-  .signal-bars .bar:nth-child(2){ height:9px; }
-  .signal-bars .bar:nth-child(3){ height:12px; }
-  .signal-bars .bar:nth-child(4){ height:15px; }
-  .signal-bars .bar:nth-child(5){ height:16px; }
+  .signal-bars .bar:nth-child(1){ height:9px; }
+  .signal-bars .bar:nth-child(2){ height:13px; }
+  .signal-bars .bar:nth-child(3){ height:18px; }
+  .signal-bars .bar:nth-child(4){ height:22px; }
+  .signal-bars .bar:nth-child(5){ height:24px; }
   .osd.show .signal-bars .bar{
     background:var(--accent); opacity:1;
     animation: fillbar .3s ease forwards;
@@ -337,10 +341,16 @@
   .player-empty[hidden]{display:none;}
 
   @media (max-width:560px){
-    .osd-number{ font-size:38px; min-width:52px; }
-    .osd-name{ font-size:16px; }
-    .osd-logo{ width:46px; height:46px; }
-    .osd-inner{ padding:13px 16px; gap:14px;}
+    .osd-number{ font-size:48px; min-width:64px; }
+    .osd-name{ font-size:20px; }
+    .osd-logo{ width:56px; height:56px; border-radius:11px; }
+    .osd-inner{ padding:16px 18px; gap:16px;}
+    .osd-meta{ flex-wrap:wrap; row-gap:4px; }
+    .osd-tag{ font-size:11.5px; padding:4px 9px; max-width:140px; }
+    .osd-live{ font-size:11.5px; }
+    .osd-clock{ font-size:16px; }
+    .osd-epg{ font-size:14px; }
+    .signal-bars{ height:18px; }
     .numpad-digits{ font-size:42px; }
     .modal-card{ padding:24px 20px 20px; }
   }
