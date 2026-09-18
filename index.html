@@ -1039,6 +1039,40 @@
     }catch(e){}
   }
 
+  // ============================================================
+  // AUTO-REFRESH PLAYLIST: ambil ulang playlist yang sama di latar
+  // belakang setiap kali web dibuka -- TIDAK perlu lagi buka Pengaturan
+  // dan menekan "Simpan & Muat Ulang" secara manual tiap kali isi
+  // playlist di repo/hosting-nya diperbarui.
+  // ============================================================
+  // Channel yang tersimpan (cache) tetap dipakai untuk mulai main SECEPAT
+  // mungkin (tidak menunggu jaringan dulu -- penting buat Smart TV), lalu
+  // playlist yang sama diam-diam diambil ulang di belakang layar. Kalau
+  // isinya berbeda dari yang tersimpan, daftar channel diperbarui otomatis.
+  // Channel yang SEDANG diputar tidak diganggu/di-reload sama sekali --
+  // cuma posisi index-nya disamakan lagi ke daftar baru (dicocokkan lewat
+  // nomor channel) supaya tombol channel naik/turun & input angka tetap
+  // merujuk ke channel yang benar. Kalau pengambilan gagal (offline,
+  // server lagi down, dll), dibiarkan diam-diam saja -- tetap pakai
+  // salinan lama yang sudah terbukti jalan, tidak mengganggu tontonan
+  // dengan pesan error.
+  function refreshPlaylistInBackground(url){
+    if(!url) return;
+    fetchPlaylist(url).then(function(text){
+      var parsed = parseM3U(text);
+      var channels = parsed.channels;
+      if(!channels || channels.length === 0) return; // playlist kosong/rusak sesaat -- jangan timpa yang lama
+      var current = state.channels[state.currentIndex];
+      persistPlaylist(url, channels, parsed.epgUrls);
+      state.channels = channels;
+      loadEpg(parsed.epgUrls);
+      if(current){
+        var idx = channels.findIndex(function(c){ return c.number === current.number; });
+        if(idx >= 0) state.currentIndex = idx;
+      }
+    }).catch(function(){ /* gagal diam-diam -- tetap pakai playlist lama yang sudah tersimpan */ });
+  }
+
   // Menyamakan proxy aktif dengan DEFAULT_PROXY_URL di kode, TAPI cuma kalau
   // baris DEFAULT_PROXY_URL itu baru saja diubah developer sejak kunjungan
   // terakhir (dideteksi lewat "snapshot" nilainya). Kalau kode tidak
@@ -2339,10 +2373,53 @@
       var idx = state.channels.findIndex(function(c){ return c.number === lastNum; });
       startPlayback(idx >= 0 ? idx : 0);
       pokeCornerBtn();
+      refreshPlaylistInBackground(persisted.url);
+      // TV yang dibiarkan menyala berhari-hari (jarang di-reload manual)
+      // tetap ikut kecipratan update playlist -- dicek ulang tiap 30 menit,
+      // senada dengan jadwal pengecekan auto-update halaman di bawah.
+      setInterval(function(){
+        refreshPlaylistInBackground(localStorage.getItem(LS_URL));
+      }, 30 * 60 * 1000);
     } else {
       openModal('boot');
     }
   }
+
+  // ============================================================
+  // AUTO-UPDATE: cek versi terbaru dari GitHub Pages, reload sendiri
+  // ============================================================
+  // GitHub Pages men-cache halaman lewat CDN mereka (biasanya ±10 menit),
+  // dan browser TV sendiri bisa ikut menyimpan cache lokal juga -- di
+  // komputer ini biasa diatasi dengan hard-refresh (Ctrl+Shift+R), tapi di
+  // remote Smart TV itu seringnya TIDAK MUNGKIN dilakukan. Jadi di sini
+  // dicek sendiri secara diam-diam: ambil ulang halaman ini APA ADANYA
+  // dari server (bypass cache manapun), bandingkan dengan salinan yang
+  // tersimpan dari kunjungan sebelumnya. Kalau beda -> berarti sudah ada
+  // update yang di-push ke GitHub -> muat ulang sendiri otomatis. Tidak
+  // perlu diubah manual tiap kali update (tidak ada nomor versi yang
+  // harus dinaikkan) -- ini bekerja untuk perubahan apa pun di file ini.
+  (function autoUpdateCheck(){
+    if(!window.fetch) return;
+    var KEY = 'xetv_page_snapshot_v1';
+    function check(){
+      fetch(location.pathname, { cache:'no-store' })
+        .then(function(res){ return res.ok ? res.text() : null; })
+        .then(function(latest){
+          if(latest == null) return;
+          var prev = null;
+          try{ prev = localStorage.getItem(KEY); }catch(e){}
+          try{ localStorage.setItem(KEY, latest); }catch(e){}
+          if(prev !== null && prev !== latest){
+            // Ada versi baru -- muat ulang dengan parameter anti-cache
+            // biar dijamin ambil berkas yang baru, bukan cache lokal lagi.
+            location.replace(location.pathname + '?_fresh=' + Date.now());
+          }
+        })
+        .catch(function(){ /* offline / gagal cek -- diamkan, tetap pakai versi yang sedang jalan */ });
+    }
+    check();
+    setInterval(check, 30 * 60 * 1000); // cek ulang tiap 30 menit -- jaga-jaga TV dibiarkan menyala lama
+  })();
 
   syncProxyDefault();
   boot();
