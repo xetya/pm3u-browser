@@ -1414,6 +1414,19 @@
     els.ytFrame.hidden = false;
     els.ytClickCatcher.hidden = false;
     showMutedBadge();
+    // JARING PENGAMAN: overlay loading di atas cuma disembunyikan kalau
+    // YouTube mengirim balik sinyal postMessage "onStateChange" (playing).
+    // Sinyal itu TIDAK SELALU terpicu (tergantung versi player YouTube/
+    // timing) -- kalau sampai tidak pernah datang, overlay yang berlatar
+    // solid itu akan menutupi iframe YouTube SELAMANYA meski videonya
+    // sendiri sebenarnya main normal di baliknya (persis gejala "stream
+    // YouTube tidak tampil"). Maka overlay dipaksa hilang setelah jeda
+    // singkat ini, apa pun yang terjadi dengan sinyal postMessage-nya.
+    setTimeout(function(){
+      if(isStale(token)) return;
+      if(!state.ytActive) return;
+      els.loadingOverlay.hidden = true;
+    }, 2500);
   }
   // YouTube (lewat enablejsapi=1) mengirim status pemutarannya balik ke
   // halaman ini lewat postMessage -- dipakai sekadar untuk menyembunyikan
