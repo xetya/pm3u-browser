@@ -374,22 +374,32 @@
   .osd-live::before{ content:''; width:8px; height:8px; border-radius:50%; background:var(--live); animation:blink 1.3s infinite;}
   .osd-right{ display:flex; flex-direction:column; align-items:flex-end; gap:12px; flex-shrink:0; }
   .osd-clock{ font-family:var(--font-mono); font-size:22px; color:var(--text-2); letter-spacing:.04em; }
+  .signal-wrap{ display:flex; flex-direction:column; align-items:flex-end; gap:5px; }
   .signal-bars{ display:flex; align-items:flex-end; gap:5px; height:24px; }
   .signal-bars .bar{
-    width:6px; background:var(--text-3); border-radius:3px; opacity:.35;
-    animation:none;
+    width:6px; border-radius:3px; background:var(--text-3); opacity:.32;
+    transform-origin:bottom;
+    transition:background-color .4s ease, opacity .4s ease;
   }
   .signal-bars .bar:nth-child(1){ height:9px; }
   .signal-bars .bar:nth-child(2){ height:13px; }
   .signal-bars .bar:nth-child(3){ height:18px; }
   .signal-bars .bar:nth-child(4){ height:22px; }
   .signal-bars .bar:nth-child(5){ height:24px; }
-  .osd.show .signal-bars .bar{
-    background:var(--accent); opacity:1;
-    animation: fillbar .3s ease forwards;
-    animation-delay: calc(var(--i) * .06s);
+  /* Warna & jumlah bar aktif ("on") dikendalikan JS berdasarkan kesehatan
+     stream nyata (buffer, throughput segmen, stall, dropped frame) --
+     lihat computeSignalScore()/setSignalUI() -- bukan lagi dekorasi tetap. */
+  .signal-bars .bar.on{ opacity:1; }
+  .signal-wrap.sig-good .bar.on{ background:#3ecf6a; }
+  .signal-wrap.sig-mid  .bar.on{ background:#e7b93e; }
+  .signal-wrap.sig-bad  .bar.on{ background:#e2543f; }
+  .signal-pct{
+    font-family:var(--font-mono); font-size:12px; letter-spacing:.03em;
+    color:var(--text-3); transition:color .4s ease;
   }
-  @keyframes fillbar{ from{ opacity:.2; transform:scaleY(.3); transform-origin:bottom;} to{ opacity:1; transform:scaleY(1);} }
+  .signal-wrap.sig-good .signal-pct{ color:#3ecf6a; }
+  .signal-wrap.sig-mid  .signal-pct{ color:#e7b93e; }
+  .signal-wrap.sig-bad  .signal-pct{ color:#e2543f; }
 
   /* ---------- Number entry overlay ---------- */
   .numpad-overlay{
@@ -550,12 +560,15 @@
     </div>
     <div class="osd-right">
       <div class="osd-clock" id="osdClock">--:--</div>
-      <div class="signal-bars">
-        <span class="bar" style="--i:0"></span>
-        <span class="bar" style="--i:1"></span>
-        <span class="bar" style="--i:2"></span>
-        <span class="bar" style="--i:3"></span>
-        <span class="bar" style="--i:4"></span>
+      <div class="signal-wrap" id="signalWrap" title="Kualitas sinyal stream (perkiraan, bukan sinyal RF)">
+        <div class="signal-bars">
+          <span class="bar" style="--i:0"></span>
+          <span class="bar" style="--i:1"></span>
+          <span class="bar" style="--i:2"></span>
+          <span class="bar" style="--i:3"></span>
+          <span class="bar" style="--i:4"></span>
+        </div>
+        <div class="signal-pct" id="signalPct">--%</div>
       </div>
     </div>
   </div>
@@ -581,7 +594,7 @@
     <div class="modal-eyebrow">TUNER</div>
     <div class="modal-title" id="modalTitle">Masukkan Playlist M3U</div>
     <p class="modal-sub" id="modalSub">Tempelkan URL playlist M3U/M3U8 kamu. Setelah berhasil dimuat, playlist ini akan tersimpan otomatis di perangkat ini.</p>
-    <div class="field-row">
+    <div class="field-row" id="mainFieldRow">
       <div class="field-col">
         <label class="field-label" for="m3uUrl">URL Playlist</label>
         <input class="field-input" id="m3uUrl" type="url" placeholder="https://contoh.com/playlist.m3u8" autocomplete="off" spellcheck="false">
@@ -596,7 +609,20 @@
       </div>
     </div>
 
-    <div class="btn-row">
+    <div class="field-row" id="syncRow" hidden>
+      <div class="field-col">
+        <label class="field-label" for="syncLink">Link Sinkronisasi (buka link ini di perangkat lain)</label>
+        <input class="field-input" id="syncLink" type="text" readonly autocomplete="off" spellcheck="false" onclick="this.select()">
+        <div style="font-size:11.5px; color:var(--text-3); margin-top:7px; line-height:1.5;">
+          Buka link ini di HP/TV lain untuk memakai playlist yang sama, otomatis ter-update tiap ada perubahan. <b>Jangan sebar link ini ke orang lain</b> -- siapa pun yang punya link ini bisa mengganti playlist kamu.
+        </div>
+      </div>
+      <div class="field-col" style="justify-content:flex-end;">
+        <button class="btn" id="copySyncBtn" type="button" style="width:100%;">Salin Link</button>
+      </div>
+    </div>
+
+    <div class="btn-row" id="loadRow">
       <button class="btn btn-primary" id="loadBtn">Mulai Menonton</button>
     </div>
     <div class="btn-row" id="resetRow" hidden>
@@ -621,6 +647,8 @@
   var LS_LAST = 'tuner_last_channel_number';
   var LS_PROXY = 'tuner_header_proxy_url';
   var LS_PROXY_SNAPSHOT = 'tuner_header_proxy_default_snapshot';
+  var LS_SYNC_ID = 'tuner_sync_id';
+  var LS_PLAYLIST_VERSION = 'tuner_playlist_forced_version';
 
   // ============================================================
   // JUDUL TAB SESUAI BAHASA PERANGKAT
@@ -675,6 +703,51 @@
   var DEFAULT_PROXY_URL = '';
 
   // ============================================================
+  // DEFAULT PLAYLIST URL (opsional, edit langsung di sini)
+  // ============================================================
+  // Kosongkan ('') untuk perilaku lama: pengunjung pertama kali diminta
+  // input URL playlist manual lewat form.
+  //
+  // Isi dengan URL playlist kamu (disarankan pakai URL worker jembatan
+  // GitHub-realtime yang sudah dibuatkan, BUKAN raw.githubusercontent.com
+  // langsung) supaya SETIAP pengunjung baru -- termasuk di TV/perangkat
+  // manapun -- langsung nonton begitu buka web ini, TANPA perlu isi
+  // apa pun sama sekali. Playlist ini otomatis diambil begitu web dibuka
+  // pertama kali di perangkat itu, lalu tersimpan & ikut auto-refresh
+  // tiap 4 menit seperti biasa setelahnya.
+  var DEFAULT_PLAYLIST_URL = '';
+
+  // Angka versi "paksa update". NAIKKAN angka ini (0 -> 1 -> 2 -> dst) tiap
+  // kali kamu mau MEMAKSA SEMUA perangkat -- termasuk yang sudah pernah
+  // input playlist SENDIRI secara manual -- pindah pakai DEFAULT_PLAYLIST_URL
+  // di atas. Ini kebalikan dari perilaku normal (pilihan manual user biasanya
+  // selalu dihormati/tidak ditimpa).
+  //
+  // Tiap perangkat menyimpan angka versi terakhir yang sudah diterapkan.
+  // Begitu angka di kode ini > angka yang tersimpan di perangkat, perangkat
+  // itu otomatis ambil DEFAULT_PLAYLIST_URL versi terbaru saat web dibuka
+  // berikutnya (atau di refresh berkala kalau webnya sedang terbuka) --
+  // TANPA perlu kamu datang/setting ulang ke perangkat itu satu-satu.
+  // Kalau tidak butuh fitur ini, biarkan 0 dan jangan diubah.
+  var DEFAULT_PLAYLIST_VERSION = 0;
+
+  // ============================================================
+  // CLOUD SYNC (opsional) -- simpan playlist di Cloudflare Worker + KV
+  // ============================================================
+  // Kosongkan ('') kalau tidak mau pakai sync cloud sama sekali -- semua
+  // tetap berjalan seperti biasa, playlist cuma tersimpan di localStorage
+  // perangkat ini saja (perilaku default/lama).
+  //
+  // Isi dengan URL Worker kamu (tanpa slash di akhir), contoh:
+  //   'https://playlist-sync.username.workers.dev'
+  // Setelah diisi, playlist akan otomatis:
+  //   1) diambil dari cloud saat web dibuka (kalau ada), lalu
+  //   2) dikirim ke cloud lagi setiap kali playlist dimuat/diperbarui,
+  //      termasuk saat auto-refresh berkala -- sehingga device lain yang
+  //      pakai kode sinkronisasi (?sync=...) yang sama otomatis ikut update.
+  var CLOUD_API_URL = '';
+
+  // ============================================================
   // KUALITAS/RESOLUSI PAKSA (opsional, edit langsung di sini)
   // ============================================================
   // Pilihan: 'auto' (default — hls.js otomatis pilih sesuai kecepatan
@@ -714,6 +787,9 @@
     osdGroup: document.getElementById('osdGroup'),
     osdEpg: document.getElementById('osdEpg'),
     osdClock: document.getElementById('osdClock'),
+    signalWrap: document.getElementById('signalWrap'),
+    signalPct: document.getElementById('signalPct'),
+    signalBarEls: Array.prototype.slice.call(document.querySelectorAll('#signalWrap .bar')),
     numpadOverlay: document.getElementById('numpadOverlay'),
     numpadDigits: document.getElementById('numpadDigits'),
     cornerBtn: document.getElementById('cornerBtn'),
@@ -727,7 +803,12 @@
     resetBtn: document.getElementById('resetBtn'),
     m3uUrl: document.getElementById('m3uUrl'),
     proxyUrl: document.getElementById('proxyUrl'),
-    loadBtn: document.getElementById('loadBtn')
+    loadBtn: document.getElementById('loadBtn'),
+    mainFieldRow: document.getElementById('mainFieldRow'),
+    loadRow: document.getElementById('loadRow'),
+    syncRow: document.getElementById('syncRow'),
+    syncLink: document.getElementById('syncLink'),
+    copySyncBtn: document.getElementById('copySyncBtn')
   };
 
   var state = {
@@ -742,6 +823,13 @@
     dash: null,
     playToken: 0,
     osdTimer: null,
+    signal: {
+      stallTimes: [],       // timestamp (ms) tiap kejadian buffering/stall, dibuang otomatis setelah 30 detik
+      throughputSamples: [],// rasio (kecepatan unduh segmen / bitrate level) beberapa segmen terakhir
+      lastDroppedFrames: null,
+      lastTotalFrames: null,
+      tickInterval: null
+    },
     cornerTimer: null,
     cursorTimer: null,
     ytActive: false,
@@ -1036,7 +1124,73 @@
       localStorage.removeItem(LS_LAST);
       localStorage.removeItem(LS_PROXY);
       localStorage.removeItem(LS_PROXY_SNAPSHOT);
+      localStorage.removeItem(LS_SYNC_ID);
     }catch(e){}
+  }
+
+  // ============================================================
+  // CLOUD SYNC -- kode sinkronisasi + panggilan ke Worker (opsional)
+  // ============================================================
+  // Kode sinkronisasi adalah "kunci" acak per-user. Dibuat sekali,
+  // disimpan di localStorage, dan ditaruh juga di URL halaman
+  // (?sync=xxxx) supaya gampang disalin ke perangkat lain -- cukup buka
+  // link yang sama di HP/TV lain, playlist otomatis ikut.
+  function randomId(){
+    if(window.crypto && crypto.randomUUID) return crypto.randomUUID().replace(/-/g, '');
+    var s = '';
+    for(var i = 0; i < 32; i++) s += Math.floor(Math.random() * 16).toString(16);
+    return s;
+  }
+  function getSyncId(){
+    try{
+      var fromUrl = new URLSearchParams(location.search).get('sync');
+      if(fromUrl){
+        localStorage.setItem(LS_SYNC_ID, fromUrl);
+        return fromUrl;
+      }
+      var stored = localStorage.getItem(LS_SYNC_ID);
+      if(stored) return stored;
+      var fresh = randomId();
+      localStorage.setItem(LS_SYNC_ID, fresh);
+      return fresh;
+    }catch(e){
+      return randomId();
+    }
+  }
+  function reflectSyncIdInUrl(id){
+    try{
+      var params = new URLSearchParams(location.search);
+      if(params.get('sync') !== id){
+        params.set('sync', id);
+        var next = location.pathname + '?' + params.toString() + location.hash;
+        history.replaceState(null, '', next);
+      }
+    }catch(e){}
+  }
+  function cloudLoad(){
+    if(!CLOUD_API_URL) return Promise.resolve(null);
+    var id = getSyncId();
+    reflectSyncIdInUrl(id);
+    return fetchWithTimeout(CLOUD_API_URL + '/playlist?id=' + encodeURIComponent(id), 8000)
+      .then(function(res){
+        if(!res.ok) throw new Error('cloud HTTP ' + res.status);
+        return res.json();
+      }).then(function(json){
+        if(json && json.found && json.data && Array.isArray(json.data.channels) && json.data.channels.length){
+          return json.data;
+        }
+        return null;
+      }).catch(function(){ return null; }); // gagal diam-diam, fallback ke lokal
+  }
+  function cloudSave(url, channels, epgUrls){
+    if(!CLOUD_API_URL) return;
+    var id = getSyncId();
+    reflectSyncIdInUrl(id);
+    fetch(CLOUD_API_URL + '/playlist?id=' + encodeURIComponent(id), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: url, channels: channels, epgUrls: epgUrls || [] })
+    }).catch(function(){ /* offline / worker down -- diamkan, coba lagi lain kali */ });
   }
 
   // ============================================================
@@ -1064,6 +1218,7 @@
       if(!channels || channels.length === 0) return; // playlist kosong/rusak sesaat -- jangan timpa yang lama
       var current = state.channels[state.currentIndex];
       persistPlaylist(url, channels, parsed.epgUrls);
+      cloudSave(url, channels, parsed.epgUrls); // ikut kirim ke cloud kalau CLOUD_API_URL diisi
       state.channels = channels;
       loadEpg(parsed.epgUrls);
       if(current){
@@ -1071,6 +1226,35 @@
         if(idx >= 0) state.currentIndex = idx;
       }
     }).catch(function(){ /* gagal diam-diam -- tetap pakai playlist lama yang sudah tersimpan */ });
+  }
+
+  // Dipanggil kalau DEFAULT_PLAYLIST_VERSION di kode > versi yang tersimpan
+  // di perangkat, DAN perangkat itu sudah terlanjur nonton (ada playlist
+  // aktif -- entah default lama atau input manual user). Jalan diam-diam di
+  // background (tidak memutus tontonan yang sedang berjalan) lalu begitu
+  // playlist baru berhasil didapat, ganti dan simpan versi barunya. Kalau
+  // gagal (offline dll), TIDAK menaikkan versi tersimpan supaya dicoba lagi
+  // di kesempatan berikutnya (buka web lagi / interval refresh berikutnya).
+  function forceApplyDefaultPlaylistInBackground(){
+    if(!DEFAULT_PLAYLIST_URL) return;
+    fetchPlaylist(DEFAULT_PLAYLIST_URL).then(function(text){
+      var parsed = parseM3U(text);
+      var channels = parsed.channels;
+      if(!channels || channels.length === 0) throw new Error('empty');
+      var current = state.channels[state.currentIndex];
+      persistPlaylist(DEFAULT_PLAYLIST_URL, channels, parsed.epgUrls);
+      cloudSave(DEFAULT_PLAYLIST_URL, channels, parsed.epgUrls);
+      try{ localStorage.setItem(LS_PLAYLIST_VERSION, String(DEFAULT_PLAYLIST_VERSION)); }catch(e){}
+      state.channels = channels;
+      loadEpg(parsed.epgUrls);
+      if(current){
+        var idx = channels.findIndex(function(c){ return c.number === current.number; });
+        state.currentIndex = idx >= 0 ? idx : 0;
+      } else {
+        state.currentIndex = 0;
+      }
+      startPlayback(state.currentIndex);
+    }).catch(function(){ /* gagal diam-diam -- coba lagi nanti, versi tersimpan TIDAK dinaikkan */ });
   }
 
   // Menyamakan proxy aktif dengan DEFAULT_PROXY_URL di kode, TAPI cuma kalau
@@ -1093,6 +1277,8 @@
 
   function openModal(mode){
     state.modalMode = mode;
+    els.mainFieldRow.hidden = false;
+    els.loadRow.hidden = false;
     if(mode === 'boot'){
       els.modalTitle.textContent = 'Masukkan Playlist M3U';
       els.modalSub.textContent = 'Tempelkan URL playlist M3U/M3U8 kamu. Setelah berhasil dimuat, playlist ini akan tersimpan otomatis di perangkat ini dan langsung diputar.';
@@ -1110,6 +1296,15 @@
       els.modalCard.classList.add('wide');
     }
     els.proxyUrl.value = (localStorage.getItem(LS_PROXY) || '');
+    if(CLOUD_API_URL){
+      els.syncRow.hidden = false;
+      var id = getSyncId();
+      reflectSyncIdInUrl(id);
+      var link = location.origin + location.pathname + '?sync=' + encodeURIComponent(id);
+      els.syncLink.value = link;
+    } else {
+      els.syncRow.hidden = true;
+    }
     els.modalError.textContent = '';
     els.modalOverlay.hidden = false;
     setTimeout(function(){ els.m3uUrl.focus(); }, 50);
@@ -1138,6 +1333,21 @@
   }
 
   els.modalCloseBtn.addEventListener('click', closeModal);
+  els.copySyncBtn.addEventListener('click', function(){
+    els.syncLink.select();
+    var done = function(){
+      var old = els.copySyncBtn.textContent;
+      els.copySyncBtn.textContent = 'Tersalin!';
+      setTimeout(function(){ els.copySyncBtn.textContent = old; }, 1500);
+    };
+    if(navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(els.syncLink.value).then(done).catch(function(){
+        try{ document.execCommand('copy'); done(); }catch(e){}
+      });
+    } else {
+      try{ document.execCommand('copy'); done(); }catch(e){}
+    }
+  });
   els.cornerBtn.addEventListener('click', function(){ openModal('settings'); });
   els.resetBtn.addEventListener('click', function(){
     clearPersisted();
@@ -1165,6 +1375,7 @@
         throw new Error('Playlist tidak berisi channel yang valid (format M3U tidak dikenali).');
       }
       persistPlaylist(url, channels, parsed.epgUrls);
+      cloudSave(url, channels, parsed.epgUrls); // ikut kirim ke cloud kalau CLOUD_API_URL diisi
       try{
         if(proxyUrl) localStorage.setItem(LS_PROXY, proxyUrl);
         else localStorage.removeItem(LS_PROXY);
@@ -1606,6 +1817,110 @@
     }
   }
 
+  /* ---------------- Indikator "sinyal" (perkiraan kesehatan stream) ----------------
+   * Stream IPTV lewat internet tidak punya angka kekuatan sinyal RF seperti
+   * parabola. Sebagai gantinya, indikator ini menghitung skor 0-100 dari
+   * gabungan 4 hal yang BENAR-BENAR diukur langsung dari pemutaran:
+   *   1) Buffer ahead   -- berapa detik video sudah "ditumpuk" di depan
+   *   2) Throughput      -- kecepatan unduh tiap segmen dibanding bitrate
+   *                         yang dibutuhkan (khusus jalur HLS/hls.js)
+   *   3) Stall/buffering -- berapa kali video berhenti nunggu data dalam
+   *                         30 detik terakhir
+   *   4) Dropped frame   -- rasio frame yang di-skip (device/koneksi
+   *                         kewalahan), kalau browser mendukung datanya
+   * Hasilnya ditampilkan sebagai bar + persentase, mirip indikator sinyal
+   * parabola, tapi mewakili kesehatan koneksi stream -- bukan sinyal RF.
+   */
+  function resetSignalMonitor(){
+    state.signal.stallTimes = [];
+    state.signal.throughputSamples = [];
+    state.signal.lastDroppedFrames = null;
+    state.signal.lastTotalFrames = null;
+    setSignalUI(null); // "measuring" -- belum ada data buat channel baru ini
+  }
+  function noteStall(){
+    var now = Date.now();
+    state.signal.stallTimes.push(now);
+    if(state.signal.stallTimes.length > 20) state.signal.stallTimes.shift();
+  }
+  function noteThroughputSample(ratio){
+    if(!isFinite(ratio) || ratio <= 0) return;
+    state.signal.throughputSamples.push(Math.min(ratio, 4));
+    if(state.signal.throughputSamples.length > 6) state.signal.throughputSamples.shift();
+  }
+  function computeSignalScore(){
+    if(!state.hasChannels || !state.channels[state.currentIndex]) return null;
+
+    // 1) Buffer ahead (detik video tersedia di depan posisi putar sekarang)
+    var bufferScore = null;
+    try{
+      var buf = els.video.buffered, t = els.video.currentTime;
+      for(var i = 0; i < buf.length; i++){
+        if(t >= buf.start(i) - 0.5 && t <= buf.end(i) + 0.5){
+          var ahead = buf.end(i) - t;
+          bufferScore = Math.max(0, Math.min(100, (ahead / 12) * 100));
+          break;
+        }
+      }
+    }catch(e){}
+    if(bufferScore === null) return null; // belum ada data buffer sama sekali -- masih "measuring"
+
+    // 2) Throughput unduh segmen vs bitrate (khusus HLS, kalau ada datanya)
+    var throughputScore = null;
+    if(state.signal.throughputSamples.length){
+      var avg = state.signal.throughputSamples.reduce(function(a, b){ return a + b; }, 0) / state.signal.throughputSamples.length;
+      throughputScore = Math.max(0, Math.min(100, (avg / 1.4) * 100));
+    }
+
+    // 3) Penalti stall -- tiap kejadian buffering dalam 30 detik terakhir
+    var now = Date.now();
+    state.signal.stallTimes = state.signal.stallTimes.filter(function(ts){ return now - ts < 30000; });
+    var stallPenalty = Math.min(60, state.signal.stallTimes.length * 20);
+
+    // 4) Penalti dropped frame (kalau browser mendukung getVideoPlaybackQuality)
+    var dropPenalty = 0;
+    try{
+      if(els.video.getVideoPlaybackQuality){
+        var q = els.video.getVideoPlaybackQuality();
+        if(state.signal.lastTotalFrames != null){
+          var dTotal = q.totalVideoFrames - state.signal.lastTotalFrames;
+          var dDropped = q.droppedVideoFrames - state.signal.lastDroppedFrames;
+          if(dTotal > 0){
+            var dropRatio = dDropped / dTotal;
+            if(dropRatio > 0.02) dropPenalty = Math.min(40, dropRatio * 400);
+          }
+        }
+        state.signal.lastTotalFrames = q.totalVideoFrames;
+        state.signal.lastDroppedFrames = q.droppedVideoFrames;
+      }
+    }catch(e){}
+
+    var base = (throughputScore !== null) ? (bufferScore * 0.5 + throughputScore * 0.5) : bufferScore;
+    return Math.round(Math.max(0, Math.min(100, base - stallPenalty - dropPenalty)));
+  }
+  function setSignalUI(score){
+    els.signalWrap.classList.remove('sig-good', 'sig-mid', 'sig-bad');
+    if(score === null){
+      els.signalPct.textContent = '--%';
+      els.signalBarEls.forEach(function(b){ b.classList.remove('on'); });
+      return;
+    }
+    var level = score >= 70 ? 'sig-good' : (score >= 40 ? 'sig-mid' : 'sig-bad');
+    els.signalWrap.classList.add(level);
+    els.signalPct.textContent = score + '%';
+    var barCount = score <= 0 ? 0 : Math.max(1, Math.ceil(score / 20));
+    els.signalBarEls.forEach(function(b, i){
+      if(i < barCount) b.classList.add('on'); else b.classList.remove('on');
+    });
+  }
+  function startSignalMonitorLoop(){
+    if(state.signal.tickInterval) return; // cuma sekali untuk seumur hidup halaman
+    els.video.addEventListener('waiting', noteStall);
+    state.signal.tickInterval = setInterval(function(){
+      setSignalUI(computeSignalScore());
+    }, 2000);
+  }
+
   /* ---------------- Number entry ---------------- */
 
   function showNumpad(buffer){
@@ -1825,6 +2140,23 @@
     hls.on(Hls.Events.FRAG_BUFFERED, function(){
       hls._netRecoverTried = false;
       hls._mediaRecoverTried = false;
+    });
+    // Dipakai indikator "sinyal" -- bandingkan kecepatan unduh tiap segmen
+    // dengan bitrate level yang sedang diputar, supaya kelihatan kalau
+    // koneksi mulai kepayahan mengejar bitrate (bukan cuma dari buffer).
+    hls.on(Hls.Events.FRAG_LOADED, function(evt, data){
+      try{
+        var stats = data.frag && data.frag.stats;
+        if(!stats || !stats.loading) return;
+        var ms = stats.loading.end - stats.loading.start;
+        var bytes = stats.loaded || stats.total || 0;
+        if(ms <= 50 || bytes <= 0) return;
+        var bitsPerSec = (bytes * 8) / (ms / 1000);
+        var lvl = hls.levels && hls.levels[data.frag.level];
+        if(lvl && lvl.bitrate){
+          noteThroughputSample(bitsPerSec / lvl.bitrate);
+        }
+      }catch(e){}
     });
     hls.loadSource(url);
     hls.attachMedia(els.video);
@@ -2244,6 +2576,7 @@
     state.currentIndex = idx;
     try{ localStorage.setItem(LS_LAST, String(ch.number)); }catch(e){}
     showOSD(ch);
+    resetSignalMonitor();
 
     var token = ++state.playToken;
 
@@ -2374,27 +2707,111 @@
 
   /* ---------------- Boot ---------------- */
 
-  function boot(){
-    startProxyWarmup();
-    var persisted = loadPersisted();
-    if(persisted){
-      state.channels = persisted.channels;
-      state.hasChannels = true;
-      els.modalOverlay.hidden = true;
-      loadEpg(persisted.epgUrls);
-      var lastNum = parseInt(localStorage.getItem(LS_LAST) || '', 10);
-      var idx = state.channels.findIndex(function(c){ return c.number === lastNum; });
-      startPlayback(idx >= 0 ? idx : 0);
-      pokeCornerBtn();
-      refreshPlaylistInBackground(persisted.url);
-      // TV yang dibiarkan menyala berhari-hari (jarang di-reload manual)
-      // tetap ikut kecipratan update playlist -- dicek ulang tiap 30 menit,
-      // senada dengan jadwal pengecekan auto-update halaman di bawah.
-      setInterval(function(){
+  function startPlaybackFromPersisted(persisted){
+    state.channels = persisted.channels;
+    state.hasChannels = true;
+    els.modalOverlay.hidden = true;
+    loadEpg(persisted.epgUrls);
+    var lastNum = parseInt(localStorage.getItem(LS_LAST) || '', 10);
+    var idx = state.channels.findIndex(function(c){ return c.number === lastNum; });
+    startPlayback(idx >= 0 ? idx : 0);
+    pokeCornerBtn();
+    refreshPlaylistInBackground(persisted.url);
+    // TV yang dibiarkan menyala berhari-hari (jarang di-reload manual)
+    // tetap ikut kecipratan update playlist -- dicek ulang tiap 4 menit.
+    // Kalau sumber M3U-nya di-cache oleh CDN (mis. raw.githubusercontent.com,
+    // yang biasanya butuh sekitar 5 menit sebelum cache-nya ikut update),
+    // interval ini memastikan TV menangkap perubahan secepat mungkin begitu
+    // cache-nya sendiri sudah reda, tanpa perlu reload manual.
+    setInterval(function(){
+      var storedVersion = 0;
+      try{ storedVersion = parseInt(localStorage.getItem(LS_PLAYLIST_VERSION) || '0', 10) || 0; }catch(e){}
+      if(DEFAULT_PLAYLIST_URL && DEFAULT_PLAYLIST_VERSION > storedVersion){
+        forceApplyDefaultPlaylistInBackground();
+      } else {
         refreshPlaylistInBackground(localStorage.getItem(LS_URL));
-      }, 30 * 60 * 1000);
+      }
+    }, 4 * 60 * 1000);
+  }
+
+  // ============================================================
+  // AUTO-LOAD PLAYLIST DEFAULT -- dipakai kalau DEFAULT_PLAYLIST_URL diisi
+  // developer, supaya pengunjung BARU (belum pernah punya playlist
+  // tersimpan di perangkatnya) tetap langsung nonton tanpa perlu input
+  // apa pun. Modal ditampilkan sebentar sebagai layar "memuat", form
+  // input disembunyikan selama proses ini.
+  // ============================================================
+  function showBootLoadingModal(){
+    els.modalTitle.textContent = 'Menyiapkan Playlist...';
+    els.modalSub.textContent = 'Playlist bawaan sedang dimuat otomatis, mohon tunggu sebentar.';
+    els.modalCloseBtn.hidden = true;
+    els.mainFieldRow.hidden = true;
+    els.loadRow.hidden = true;
+    els.resetRow.hidden = true;
+    els.modalError.textContent = '';
+    els.modalOverlay.hidden = false;
+  }
+  function autoLoadDefaultPlaylist(){
+    showBootLoadingModal();
+    fetchPlaylist(DEFAULT_PLAYLIST_URL).then(function(text){
+      var parsed = parseM3U(text);
+      var channels = parsed.channels;
+      if(!channels || channels.length === 0){
+        throw new Error('Playlist bawaan kosong/tidak valid.');
+      }
+      persistPlaylist(DEFAULT_PLAYLIST_URL, channels, parsed.epgUrls);
+      cloudSave(DEFAULT_PLAYLIST_URL, channels, parsed.epgUrls);
+      try{ localStorage.setItem(LS_PLAYLIST_VERSION, String(DEFAULT_PLAYLIST_VERSION)); }catch(e){}
+      startPlaybackFromPersisted({ url: DEFAULT_PLAYLIST_URL, channels: channels, epgUrls: parsed.epgUrls });
+    }).catch(function(err){
+      // Gagal (offline, worker down, dll) -- jangan biarkan user stuck di
+      // layar loading kosong. Buka form manual, URL sudah diisi otomatis
+      // supaya tinggal klik "Mulai Menonton" untuk coba lagi.
+      els.mainFieldRow.hidden = false;
+      els.loadRow.hidden = false;
+      els.modalTitle.textContent = 'Masukkan Playlist M3U';
+      els.modalSub.textContent = 'Gagal memuat playlist bawaan otomatis. Coba lagi, atau masukkan URL lain secara manual.';
+      els.loadBtn.textContent = 'Mulai Menonton';
+      els.m3uUrl.value = DEFAULT_PLAYLIST_URL;
+      els.modalError.textContent = err.message || 'Gagal memuat playlist.';
+    });
+  }
+
+  function startFromPersistedOrModal(){
+    var persisted = loadPersisted();
+    var storedVersion = 0;
+    try{ storedVersion = parseInt(localStorage.getItem(LS_PLAYLIST_VERSION) || '0', 10) || 0; }catch(e){}
+    var forcePending = DEFAULT_PLAYLIST_URL && DEFAULT_PLAYLIST_VERSION > storedVersion;
+
+    if(persisted){
+      // Sudah ada tontonan aktif di perangkat ini -- mulai putar dulu tanpa
+      // jeda. Kalau developer sedang "memaksa" versi playlist baru, proses
+      // penggantiannya jalan belakangan (background), tidak memutus apa
+      // yang sedang tampil di layar sekarang.
+      startPlaybackFromPersisted(persisted);
+      if(forcePending) forceApplyDefaultPlaylistInBackground();
+    } else if(DEFAULT_PLAYLIST_URL){
+      autoLoadDefaultPlaylist();
     } else {
       openModal('boot');
+    }
+  }
+
+  function boot(){
+    startProxyWarmup();
+    if(CLOUD_API_URL){
+      // Coba ambil playlist dari cloud dulu (device lain mungkin sudah
+      // menyimpan/mengubahnya). Kalau gagal/kosong, jatuh ke salinan lokal
+      // di perangkat ini seperti biasa -- tidak pernah membuat user
+      // menunggu tanpa hasil.
+      cloudLoad().then(function(cloud){
+        if(cloud){
+          persistPlaylist(cloud.url, cloud.channels, cloud.epgUrls);
+        }
+        startFromPersistedOrModal();
+      });
+    } else {
+      startFromPersistedOrModal();
     }
   }
 
@@ -2435,6 +2852,7 @@
   })();
 
   syncProxyDefault();
+  startSignalMonitorLoop();
   boot();
 })();
 </script>
