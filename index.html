@@ -887,6 +887,7 @@
     var pendingHeaders = {};
     var pendingDrm = {};
     var pendingProxyName = '';
+    var pendingQuality = '';
     var attrRegex = /([a-zA-Z0-9_-]+)="([^"]*)"/g;
 
     // Ambil daftar URL EPG (XMLTV) dari baris #EXTM3U paling atas, kalau
@@ -981,6 +982,24 @@
       if(val) pendingProxyName = val;
     }
 
+    // #EXTQUALITY: <low|medium|high|auto|angka> — tag non-standar (khusus
+    // web ini) untuk memaksa resolusi channel tertentu, menimpa
+    // DEFAULT_QUALITY global hanya untuk channel yang bersangkutan. Selain
+    // 4 kata kunci itu, boleh juga diisi ANGKA tinggi resolusi (mis. "480"
+    // untuk 480p) — nanti dicari varian yang tingginya PALING DEKAT ke
+    // angka itu di antara yang tersedia di manifest. Nilai lain (typo dsb)
+    // diabaikan, dianggap tidak ada tag.
+    function applyExtQuality(line){
+      var idx = line.indexOf(':');
+      if(idx < 0) return;
+      var val = line.slice(idx+1).trim().toLowerCase();
+      if(val === 'low' || val === 'medium' || val === 'high' || val === 'auto'){
+        pendingQuality = val;
+      } else if(/^\d+$/.test(val)){
+        pendingQuality = val; // angka mentah, dibedakan dari kata kunci saat dipakai nanti
+      }
+    }
+
     for(var i=0;i<lines.length;i++){
       var line = lines[i].trim();
       if(!line) continue;
@@ -1031,9 +1050,11 @@
           if(pendingDrm.type) current.drmType = pendingDrm.type;
           if(pendingDrm.licenseUrl) current.drmLicenseUrl = pendingDrm.licenseUrl;
           if(pendingProxyName) current.proxyName = pendingProxyName;
+          if(pendingQuality) current.quality = pendingQuality;
           pendingHeaders = {};
           pendingDrm = {};
           pendingProxyName = '';
+          pendingQuality = '';
         } else if(upper.indexOf('#EXTVLCOPT') === 0){
           applyVlcOpt(line);
         } else if(upper.indexOf('#EXTHTTP') === 0){
@@ -1042,11 +1063,13 @@
           applyKodiProp(line);
         } else if(upper.indexOf('#EXTPROXY') === 0){
           applyExtProxy(line);
+        } else if(upper.indexOf('#EXTQUALITY') === 0){
+          applyExtQuality(line);
         }
         continue;
       }
       if(!current){
-        var hasPending = pendingHeaders.referer || pendingHeaders.userAgent || pendingHeaders.origin || pendingDrm.type || pendingDrm.licenseUrl || pendingProxyName;
+        var hasPending = pendingHeaders.referer || pendingHeaders.userAgent || pendingHeaders.origin || pendingDrm.type || pendingDrm.licenseUrl || pendingProxyName || pendingQuality;
         if(!hasPending){
           // URL "yatim" tanpa EXTINF dan tanpa header/DRM apa pun tertunda
           // — biasanya cuma alamat cadangan/duplikat yang memang tidak
@@ -1066,11 +1089,13 @@
       if(pendingDrm.type) current.drmType = pendingDrm.type;
       if(pendingDrm.licenseUrl) current.drmLicenseUrl = pendingDrm.licenseUrl;
       if(pendingProxyName) current.proxyName = pendingProxyName;
+      if(pendingQuality) current.quality = pendingQuality;
       channels.push(current);
       current = null;
       pendingHeaders = {};
       pendingDrm = {};
       pendingProxyName = '';
+      pendingQuality = '';
     }
     return { channels: assignNumbers(channels), epgUrls: epgUrls };
   }
@@ -2101,7 +2126,7 @@
     els.video.addEventListener('error', onErr, {once:true});
   }
 
-  function tryHls(url, token, onFail){
+  function tryHls(url, token, ch, onFail){
     if(isStale(token)) return;
     if(!(window.Hls && Hls.isSupported())){
       // Safari & beberapa browser TV punya dukungan HLS native lewat <video> langsung.
@@ -2162,7 +2187,7 @@
     }
     hls.on(Hls.Events.MANIFEST_PARSED, function(){
       if(isStale(token)) return;
-      applyForcedQuality(hls);
+      applyForcedQuality(hls, ch);
       attemptPlay(token, fail);
     });
     hls.on(Hls.Events.ERROR, function(evt, data){
@@ -2212,15 +2237,44 @@
     hls.attachMedia(els.video);
   }
 
-  // Memaksa level kualitas HLS sesuai DEFAULT_QUALITY, kalau bukan 'auto'
-  // dan manifest-nya memang punya lebih dari satu varian resolusi. Urutan
-  // level di hls.levels tidak dijamin terurut, jadi diurutkan dulu sendiri
-  // berdasarkan bitrate sebelum memilih indeks rendah/sedang/tinggi.
-  function applyForcedQuality(hls){
-    var mode = DEFAULT_QUALITY;
+  // Cari indeks level/bitrate yang tingginya (height) PALING DEKAT ke
+  // targetHeight. getHeight menerima 1 item dari array levels/bitrates dan
+  // harus mengembalikan angka tinggi resolusinya (atau undefined kalau
+  // tidak ada info tinggi). Kalau TIDAK SATU PUN item punya info tinggi
+  // (jarang, tapi mungkin di sebagian manifest audio/aneh), kembalikan -1
+  // supaya pemanggil bisa jatuh kembali ke logika low/medium/high biasa
+  // alih-alih diam-diam salah pilih.
+  function findClosestByHeight(items, targetHeight, getHeight){
+    var bestIdx = -1, bestDiff = Infinity;
+    for(var i=0;i<items.length;i++){
+      var h = getHeight(items[i]);
+      if(h === undefined || h === null || !isFinite(h)) continue;
+      var diff = Math.abs(h - targetHeight);
+      if(diff < bestDiff){ bestDiff = diff; bestIdx = i; }
+    }
+    return bestIdx;
+  }
+
+  // Memaksa level kualitas HLS sesuai mode (dari tag #EXTQUALITY channel,
+  // atau DEFAULT_QUALITY global kalau channel tidak punya tag), kalau bukan
+  // 'auto' dan manifest-nya memang punya lebih dari satu varian resolusi.
+  // Urutan level di hls.levels tidak dijamin terurut, jadi diurutkan dulu
+  // sendiri berdasarkan bitrate sebelum memilih indeks rendah/sedang/tinggi
+  // (mode kata kunci) — atau dicari langsung berdasarkan tinggi resolusi
+  // (mode angka, mis. "480" untuk 480p).
+  function applyForcedQuality(hls, ch){
+    var mode = (ch && ch.quality) ? ch.quality : DEFAULT_QUALITY;
     if(!mode || mode === 'auto') return;
     var levels = hls.levels;
     if(!levels || levels.length <= 1) return; // cuma 1 resolusi, tidak ada yang bisa dipilih
+    if(/^\d+$/.test(String(mode))){
+      var closest = findClosestByHeight(levels, parseInt(mode, 10), function(lv){ return lv.height; });
+      if(closest >= 0){ hls.currentLevel = closest; return; }
+      // Tidak ada info tinggi sama sekali di manifest ini -> lanjut ke
+      // logika low/medium/high di bawah sebagai fallback yang masuk akal,
+      // dengan menganggap mode angka yang tidak bisa dipakai = 'medium'.
+      mode = 'medium';
+    }
     var order = levels.map(function(lv, i){ return i; });
     order.sort(function(a, b){
       return (levels[a].bitrate || 0) - (levels[b].bitrate || 0);
@@ -2384,7 +2438,7 @@
 
       player.on(dashjs.MediaPlayer.events.ERROR, fail);
       player.on(dashjs.MediaPlayer.events.STREAM_INITIALIZED, function(){
-        applyForcedQualityDash(player);
+        applyForcedQualityDash(player, ch);
       });
       player.initialize(els.video, url, false);
       attemptPlay(token, fail);
@@ -2393,15 +2447,24 @@
     }
   }
 
-  // Versi dash.js dari applyForcedQuality — logikanya sama (urutkan
-  // berdasarkan bitrate, pilih indeks rendah/sedang/tinggi), API-nya
-  // saja yang beda dari hls.js.
-  function applyForcedQualityDash(player){
-    var mode = DEFAULT_QUALITY;
+  // Versi dash.js dari applyForcedQuality — logikanya sama (mode angka
+  // dicari lewat tinggi resolusi paling dekat, mode kata kunci diurutkan
+  // berdasarkan bitrate), API-nya saja yang beda dari hls.js.
+  function applyForcedQualityDash(player, ch){
+    var mode = (ch && ch.quality) ? ch.quality : DEFAULT_QUALITY;
     if(!mode || mode === 'auto') return;
     try{
       var bitrates = player.getBitrateInfoListFor('video');
       if(!bitrates || bitrates.length <= 1) return;
+      if(/^\d+$/.test(String(mode))){
+        var closest = findClosestByHeight(bitrates, parseInt(mode, 10), function(b){ return b.height; });
+        if(closest >= 0){
+          player.updateSettings({ streaming: { abr: { autoSwitchBitrate: { video: false } } } });
+          player.setQualityFor('video', closest);
+          return;
+        }
+        mode = 'medium'; // tidak ada info tinggi di manifest ini, fallback
+      }
       var order = bitrates.map(function(b, i){ return i; });
       order.sort(function(a, b){
         return (bitrates[a].bitrate || 0) - (bitrates[b].bitrate || 0);
@@ -2499,16 +2562,16 @@
     }
 
     if(ext === 'mpd'){
-      tryDash(url, token, ch, function(){ tryHls(url, token, function(){ tryNativeVideo(url, token, giveUp); }); });
+      tryDash(url, token, ch, function(){ tryHls(url, token, ch, function(){ tryNativeVideo(url, token, giveUp); }); });
     } else if(ext === 'flv'){
       tryMpegts(url, 'flv', token, function(){ tryNativeVideo(url, token, giveUp); });
     } else if(ext === 'ts'){
       tryMpegts(url, 'mpegts', token, function(){ tryNativeVideo(url, token, giveUp); });
     } else if(ext === 'mp4' || ext === 'webm' || ext === 'ogg'){
-      tryNativeVideo(url, token, function(){ tryHls(url, token, giveUp); });
+      tryNativeVideo(url, token, function(){ tryHls(url, token, ch, giveUp); });
     } else {
       // m3u8 atau ekstensi tidak dikenal: HLS dulu, lalu MPEG-TS, lalu native mentah.
-      tryHls(url, token, function(){
+      tryHls(url, token, ch, function(){
         tryMpegts(url, 'mpegts', token, function(){ tryNativeVideo(url, token, giveUp); });
       });
     }
