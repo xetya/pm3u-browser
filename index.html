@@ -370,6 +370,12 @@
     background:rgba(255,255,255,.05); border:1px solid var(--line); padding:5px 12px; border-radius:7px;
     text-transform:uppercase; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:280px;
   }
+  /* Badge resolusi: dibuat menumpang gaya .osd-tag yang sudah ada (ukuran
+     dan proporsi sama persis) supaya tidak menggeser/mengubah tata letak
+     baris meta lainnya (LIVE, grup) -- cuma warnanya dibedakan tipis
+     (border pakai warna aksen) biar gampang dibedakan sekilas dari tag
+     grup channel. */
+  .osd-tag.osd-res{ color:var(--text-1); border-color:rgba(255,176,32,.35); max-width:120px; }
   .osd-live{ display:flex; align-items:center; gap:7px; font-family:var(--font-mono); font-size:14px; color:var(--live); letter-spacing:.06em;}
   .osd-live::before{ content:''; width:8px; height:8px; border-radius:50%; background:var(--live); animation:blink 1.3s infinite;}
   .osd-right{ display:flex; flex-direction:column; align-items:flex-end; gap:12px; flex-shrink:0; }
@@ -458,6 +464,7 @@
     .osd-inner{ padding:16px 18px; gap:16px;}
     .osd-meta{ flex-wrap:wrap; row-gap:4px; }
     .osd-tag{ font-size:11.5px; padding:4px 9px; max-width:140px; }
+    .osd-tag.osd-res{ max-width:90px; }
     .osd-live{ font-size:11.5px; }
     .osd-clock{ font-size:16px; }
     .osd-epg{ font-size:14px; }
@@ -554,6 +561,7 @@
       <div class="osd-name" id="osdName">—</div>
       <div class="osd-meta">
         <span class="osd-live">LIVE</span>
+        <span class="osd-tag osd-res" id="osdRes" hidden></span>
         <span class="osd-tag" id="osdGroup" hidden></span>
       </div>
       <div class="osd-epg" id="osdEpg" hidden></div>
@@ -799,6 +807,7 @@
     osdNumber: document.getElementById('osdNumber'),
     osdName: document.getElementById('osdName'),
     osdGroup: document.getElementById('osdGroup'),
+    osdRes: document.getElementById('osdRes'),
     osdEpg: document.getElementById('osdEpg'),
     osdClock: document.getElementById('osdClock'),
     signalWrap: document.getElementById('signalWrap'),
@@ -1840,6 +1849,34 @@
       .catch(function(){ /* server menolak/CORS -- diamkan, ini memang usaha terbaik saja */ });
   }
 
+  // Menampilkan resolusi video yang SEDANG benar-benar diputar (bukan cuma
+  // resolusi yang "diminta" lewat #EXTQUALITY/DEFAULT_QUALITY) -- diambil
+  // langsung dari videoWidth/videoHeight elemen <video>, jadi berlaku sama
+  // untuk semua jalur pemutaran (HLS/DASH/MPEG-TS/native), bukan cuma yang
+  // pakai hls.js/dash.js. Label ditulis huruf kecil ("720p") tapi otomatis
+  // tampil kapital lewat CSS .osd-tag yang sudah ada (text-transform),
+  // jadi konsisten dengan tag grup channel di sebelahnya.
+  function updateOsdResolution(){
+    var w = els.video.videoWidth, h = els.video.videoHeight;
+    if(!w || !h){
+      els.osdRes.hidden = true;
+      return;
+    }
+    els.osdRes.textContent = h + 'p';
+    els.osdRes.title = w + '\u00d7' + h; // detail piksel persis, cuma sebagai tooltip
+    els.osdRes.hidden = false;
+  }
+  // Ikut diperbarui SECARA LIVE kalau OSD sedang tampil saat resolusi
+  // berubah (mis. ABR pindah level otomatis) -- tidak memicu ulang animasi
+  // OSD, cuma teksnya saja yang berubah, jadi tidak mengganggu elemen OSD
+  // lain (nama, EPG, jam, dst tetap seperti biasa).
+  els.video.addEventListener('loadedmetadata', function(){
+    if(els.osd.classList.contains('show')) updateOsdResolution();
+  });
+  els.video.addEventListener('resize', function(){
+    if(els.osd.classList.contains('show')) updateOsdResolution();
+  });
+
   function showOSD(ch){
     updateRadioCover(ch);
     els.osdNumber.textContent = ch.number;
@@ -1850,6 +1887,7 @@
     } else {
       els.osdGroup.hidden = true;
     }
+    updateOsdResolution();
     refreshOsdEpg(ch);
     if(ch.logo){
       els.osdLogo.innerHTML = '<img src="' + ch.logo.replace(/"/g,'&quot;') + '" alt="">';
