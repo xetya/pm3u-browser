@@ -703,6 +703,20 @@
   var DEFAULT_PROXY_URL = 'https://tuner-header-proxy.nubuuys77.workers.dev';
 
   // ============================================================
+  // PETA PROXY BERNAMA (opsional, untuk tag #EXTPROXY di M3U)
+  // ============================================================
+  // Kalau sebuah channel di playlist punya baris "#EXTPROXY: <nama>" tepat
+  // sebelum EXTINF/URL-nya, channel itu akan lewat proxy yang namanya cocok
+  // di peta ini — MENIMPA proxy global (DEFAULT_PROXY_URL / kolom pengaturan)
+  // hanya untuk channel tersebut. Channel lain yang tidak punya tag ini tetap
+  // memakai proxy global seperti biasa. Nama tidak case-sensitive
+  // ("cloudflare", "Cloudflare", "CLOUDFLARE" semuanya cocok).
+  var PROXY_MAP = {
+    deno: 'https://flat-dodo-1598.xetya77.deno.net',
+    cloudflare: 'https://tuner-header-proxy.nubuuys77.workers.dev'
+  };
+
+  // ============================================================
   // DEFAULT PLAYLIST URL (opsional, edit langsung di sini)
   // ============================================================
   // Kosongkan ('') untuk perilaku lama: pengunjung pertama kali diminta
@@ -872,6 +886,7 @@
     var current = null;
     var pendingHeaders = {};
     var pendingDrm = {};
+    var pendingProxyName = '';
     var attrRegex = /([a-zA-Z0-9_-]+)="([^"]*)"/g;
 
     // Ambil daftar URL EPG (XMLTV) dari baris #EXTM3U paling atas, kalau
@@ -955,6 +970,17 @@
       }
     }
 
+    // #EXTPROXY: <nama> — tag non-standar (khusus web ini) untuk memaksa
+    // channel tertentu lewat proxy bernama tertentu (lihat PROXY_MAP di
+    // atas), mis. "#EXTPROXY: deno" atau "#EXTPROXY: cloudflare". Ditulis
+    // di baris manapun sebelum EXTINF/URL channel yang bersangkutan.
+    function applyExtProxy(line){
+      var idx = line.indexOf(':');
+      if(idx < 0) return;
+      var val = line.slice(idx+1).trim().toLowerCase();
+      if(val) pendingProxyName = val;
+    }
+
     for(var i=0;i<lines.length;i++){
       var line = lines[i].trim();
       if(!line) continue;
@@ -1004,19 +1030,23 @@
           if(pendingHeaders.origin) current.origin = pendingHeaders.origin;
           if(pendingDrm.type) current.drmType = pendingDrm.type;
           if(pendingDrm.licenseUrl) current.drmLicenseUrl = pendingDrm.licenseUrl;
+          if(pendingProxyName) current.proxyName = pendingProxyName;
           pendingHeaders = {};
           pendingDrm = {};
+          pendingProxyName = '';
         } else if(upper.indexOf('#EXTVLCOPT') === 0){
           applyVlcOpt(line);
         } else if(upper.indexOf('#EXTHTTP') === 0){
           applyExtHttp(line);
         } else if(upper.indexOf('#KODIPROP') === 0){
           applyKodiProp(line);
+        } else if(upper.indexOf('#EXTPROXY') === 0){
+          applyExtProxy(line);
         }
         continue;
       }
       if(!current){
-        var hasPending = pendingHeaders.referer || pendingHeaders.userAgent || pendingHeaders.origin || pendingDrm.type || pendingDrm.licenseUrl;
+        var hasPending = pendingHeaders.referer || pendingHeaders.userAgent || pendingHeaders.origin || pendingDrm.type || pendingDrm.licenseUrl || pendingProxyName;
         if(!hasPending){
           // URL "yatim" tanpa EXTINF dan tanpa header/DRM apa pun tertunda
           // — biasanya cuma alamat cadangan/duplikat yang memang tidak
@@ -1035,10 +1065,12 @@
       if(pendingHeaders.origin) current.origin = pendingHeaders.origin;
       if(pendingDrm.type) current.drmType = pendingDrm.type;
       if(pendingDrm.licenseUrl) current.drmLicenseUrl = pendingDrm.licenseUrl;
+      if(pendingProxyName) current.proxyName = pendingProxyName;
       channels.push(current);
       current = null;
       pendingHeaders = {};
       pendingDrm = {};
+      pendingProxyName = '';
     }
     return { channels: assignNumbers(channels), epgUrls: epgUrls };
   }
@@ -1977,7 +2009,16 @@
     return m ? m[1].toLowerCase() : '';
   }
 
-  function getProxyBase(){
+  function getProxyBase(ch){
+    // Kalau channel ini punya tag #EXTPROXY di playlist DAN namanya
+    // dikenal di PROXY_MAP, proxy bernama itu MENANG dan dipakai — tidak
+    // peduli proxy global (kolom pengaturan / DEFAULT_PROXY_URL) diisi
+    // apa. Kalau tag ada tapi namanya tidak dikenal, abaikan tag itu dan
+    // jatuh kembali ke proxy global seperti biasa (bukan malah tidak ada
+    // proxy sama sekali).
+    if(ch && ch.proxyName && PROXY_MAP[ch.proxyName]){
+      return String(PROXY_MAP[ch.proxyName]).replace(/\/+$/, '');
+    }
     var v = '';
     try{ v = (localStorage.getItem(LS_PROXY) || '').trim(); }catch(e){}
     return v.replace(/\/+$/, '');
@@ -1991,13 +2032,22 @@
   // tidak menjamin cold start hilang total, tapi membuat instance-nya
   // kemungkinan besar sudah hangat saat channel benar-benar diputar.
   var warmupTimer = null;
-  function warmupProxy(){
-    var base = getProxyBase();
+  function pingProxyWarmup(base){
     if(!base) return;
     try{
       fetch(base + '/?url=' + encodeURIComponent('https://example.com/warmup.m3u8'), { method: 'GET', cache: 'no-store' })
         .catch(function(){ /* diam-diam abaikan, ini cuma pemanasan */ });
     }catch(e){ /* abaikan */ }
+  }
+  function warmupProxy(){
+    // Panaskan proxy global (kalau ada)...
+    pingProxyWarmup(getProxyBase());
+    // ...DAN semua proxy bernama di PROXY_MAP (dipakai lewat #EXTPROXY),
+    // supaya channel yang menunjuk ke proxy tertentu tidak kena cold
+    // start penuh saat pertama kali dipilih.
+    Object.keys(PROXY_MAP).forEach(function(name){
+      pingProxyWarmup(String(PROXY_MAP[name] || '').replace(/\/+$/, ''));
+    });
   }
   function startProxyWarmup(){
     if(warmupTimer) clearInterval(warmupTimer);
@@ -2261,7 +2311,7 @@
       //    manifest/video). Browser butuh CDM bawaan (Chrome/Edge/Android
       //    punya Widevine; Safari TIDAK punya sama sekali) untuk benar-
       //    benar mendekripsinya; kita cuma menjembatani permintaannya.
-      var proxyBase = getProxyBase();
+      var proxyBase = getProxyBase(ch);
       // CATATAN PERBAIKAN: playlist umumnya menulis license_type dengan
       // nama DRM-system standar "org.w3.clearkey" (bukan cuma "clearkey"
       // polos). Sebelumnya kode ini cuma cocok kalau nilainya PERSIS
@@ -2590,7 +2640,7 @@
     stopYoutube();
 
     var ext = getExt(ch.url);
-    var proxyBase = getProxyBase();
+    var proxyBase = getProxyBase(ch);
     // Kalau proxy sudah dikonfigurasi, SEMUA channel lewat proxy itu — bukan
     // hanya yang menyatakan butuh header khusus. Banyak server IPTV memblokir
     // akses browser (CORS) meski tidak menuntut Referer/User-Agent tertentu,
