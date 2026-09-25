@@ -1836,7 +1836,7 @@
     void els.osd.offsetWidth; // restart animation
     els.osd.classList.add('show');
     clearTimeout(state.osdTimer);
-    state.osdTimer = setTimeout(function(){ els.osd.classList.remove('show'); }, 4200);
+    state.osdTimer = setTimeout(function(){ els.osd.classList.remove('show'); }, 20000);
   }
   function toggleOSD(){
     var ch = state.channels[state.currentIndex];
